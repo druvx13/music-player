@@ -47,7 +47,7 @@ Follow these steps to set up the project on your local machine:
    - Import the provided `database.sql` file into this database.
 
 3. **Update Database Configuration:**
-   - Open `index2.php`.
+   - Open `index.php`.
    - Modify the MySQL credentials if necessary:
      ```php
      // Database configuration
