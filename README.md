@@ -50,7 +50,11 @@ Follow these steps to set up the project on your local machine:
    - Open `index2.php`.
    - Modify the MySQL credentials if necessary:
      ```php
-     $conn = mysqli_connect("localhost", "root", "", "musicdb");
+     // Database configuration
+     $host = "localhost";
+     $db = "db_name";
+     $user = "user_name";
+     $pass = "user_pass";
      ```
 
 4. **Add Your Music Files:**
