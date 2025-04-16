@@ -72,9 +72,10 @@ Follow these steps to set up the project on your local machine:
 ```
 music-player/
 ├── songs/              # Folder for audio files
-├── index2.php          # Main PHP application file
+├── index.php          # Main PHP application file
 ├── database.sql        # MySQL dump file
-├── README.md           # This file
+├── README.md           
+├── LICENCE         
 ```
 
 ## License
