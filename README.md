@@ -58,7 +58,7 @@ Follow these steps to set up the project on your local machine:
      ```
 
 4. **Add Your Music Files:**
-   - Upload your `.mp3` or audio files to the `/uploads` directory.
+   - Upload your audio favourite audios through the upload button shown in index.php which will popup an form field to be filled in and you can customise that however you want and the uploaded songs & their covers will be stored in `/uploads` directory & such other things such as title, artist, lyrics etc will be stored in MySQL database.
    - Make sure the file names match the entries in your database.
 
 5. **Run the App:**
