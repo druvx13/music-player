@@ -13,8 +13,8 @@ A simple, dynamic PHP-based music player web application that allows users to br
 
 ## Demo
 
-![Music Player Screenshot](demo-screenshot.png)  
-*(Optional: Add a screenshot or a GIF preview of the player UI)*
+![Music Player Screenshot](gtavc-matrix-dk-eu-org-1024xFULLdesktop-dacc32.png)  
+
 
 ## Technologies Used
 
