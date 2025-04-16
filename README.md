@@ -58,7 +58,7 @@ Follow these steps to set up the project on your local machine:
      ```
 
 4. **Add Your Music Files:**
-   - Upload your `.mp3` or audio files to the `songs/` directory.
+   - Upload your `.mp3` or audio files to the `/uploads` directory.
    - Make sure the file names match the entries in your database.
 
 5. **Run the App:**
@@ -71,7 +71,7 @@ Follow these steps to set up the project on your local machine:
 
 ```
 music-player/
-├── songs/              # Folder for audio files
+├── uploads/              # Folder for audio files
 ├── index.php          # Main PHP application file
 ├── database.sql        # MySQL dump file
 ├── README.md           
