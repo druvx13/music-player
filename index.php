@@ -1,10 +1,10 @@
 <?php
 // index.php
 // Database configuration
-$host = "sql111.byetcluster.com";
-$db = "ssmm_32394582_music";
-$user = "ssmm_32394582";
-$pass = "13qrny65";
+$host = "localhost";
+$db = "db_name";
+$user = "user_name";
+$pass = "user_pass";
 
 // Create connection using MySQLi
 $conn = new mysqli($host, $user, $pass, $db);
