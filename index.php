@@ -1,99 +1,162 @@
 <?php
 // index.php
 // Database configuration
-$host = "localhost";
-$db = "db_name";
-$user = "user_name";
-$pass = "user_pass";
+$host = "localhost"; // Or your specific host
+$db = "db_name"; // Your database name
+$user = "user_name"; // Your database username
+$pass = "user_pass"; // Your database password
+$charset = 'utf8mb4';
 
-// Create connection using MySQLi
-$conn = new mysqli($host, $user, $pass, $db);
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
+$dsn = "mysql:host=$host;dbname=$db;charset=$charset";
+$options = [
+    PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    PDO::ATTR_EMULATE_PREPARES   => false,
+];
+
+$pdo = null; // Initialize $pdo to null
 
 // API endpoints
 if (isset($_GET['action'])) {
     $action = $_GET['action'];
-    
-    // Get playlist endpoint
-    if ($action === 'getPlaylist') {
-        header("Content-Type: application/json");
-        $sql = "SELECT * FROM songs ORDER BY uploaded_at DESC";
-        $result = $conn->query($sql);
-        $songs = array();
-        while ($row = $result->fetch_assoc()) {
-            $songs[] = $row;
+
+    try {
+        // Establish PDO connection only when an action is requested
+        $pdo = new PDO($dsn, $user, $pass, $options);
+
+        // Get playlist endpoint
+        if ($action === 'getPlaylist') {
+            header("Content-Type: application/json");
+            $sql = "SELECT id, title, file, cover, artist, lyrics, DATE_FORMAT(uploaded_at, '%Y-%m-%d %H:%i:%s') as uploaded_at FROM songs ORDER BY uploaded_at DESC";
+            $stmt = $pdo->query($sql);
+            $songs = $stmt->fetchAll();
+            echo json_encode($songs);
         }
-        echo json_encode($songs);
-        $conn->close();
-        exit;
-    }
-    
-    // Upload song endpoint
-    if ($action === 'uploadSong') {
-        header("Content-Type: application/json");
 
-        // Process song file upload
-        if (isset($_FILES['song'])) {
-            $uploadDir = 'uploads/';
-            if (!is_dir($uploadDir)) {
-                mkdir($uploadDir, 0777, true);
-            }
-            $songName = basename($_FILES['song']['name']);
-            $targetSong = $uploadDir . $songName;
-            $songType = strtolower(pathinfo($targetSong, PATHINFO_EXTENSION));
+        // Upload song endpoint
+        elseif ($action === 'uploadSong') {
+            header("Content-Type: application/json");
 
-            // Validate song file type
-            if ($songType !== "mp3") {
-                echo json_encode(array("error" => "Only MP3 files allowed"));
-                exit;
-            }
-            if (move_uploaded_file($_FILES['song']['tmp_name'], $targetSong)) {
-                $songURL = $targetSong;
+            // Process song file upload
+            if (isset($_FILES['song']) && $_FILES['song']['error'] == UPLOAD_ERR_OK) {
+                $uploadDir = 'uploads/';
+                if (!is_dir($uploadDir)) {
+                    // Changed permissions from 0777 to 0755
+                    if (!mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
+                        echo json_encode(array("error" => "Failed to create upload directory."));
+                        exit;
+                    }
+                }
+
+                $songTmpPath = $_FILES['song']['tmp_name'];
+                $songOriginalName = basename($_FILES['song']['name']);
+                $songExtension = strtolower(pathinfo($songOriginalName, PATHINFO_EXTENSION));
+
+                // MIME Type validation for song
+                $songMimeType = mime_content_type($songTmpPath);
+                if ($songMimeType !== 'audio/mpeg' && $songMimeType !== 'audio/mp3') {
+                    echo json_encode(array("error" => "Invalid song file type. Only MP3 audio is allowed. Detected: " . $songMimeType));
+                    exit;
+                }
+                // Additional check for extension, though MIME is primary
+                if ($songExtension !== "mp3") {
+                    echo json_encode(array("error" => "Invalid song file extension. Only .mp3 is allowed."));
+                    exit;
+                }
+
+                $songName = pathinfo($songOriginalName, PATHINFO_FILENAME) . '_' . time() . '.' . $songExtension;
+                $targetSong = $uploadDir . $songName;
+
+                if (move_uploaded_file($songTmpPath, $targetSong)) {
+                    $songURL = $targetSong;
+                } else {
+                    echo json_encode(array("error" => "Song upload failed, could not move file. Check permissions or file size."));
+                    exit;
+                }
             } else {
-                echo json_encode(array("error" => "Song upload failed"));
+                echo json_encode(array("error" => "No song file provided"));
                 exit;
             }
-        } else {
-            echo json_encode(array("error" => "No song file provided"));
-            exit;
-        }
 
-        // Process cover image upload
-        $coverURL = '';
-        if (isset($_FILES['cover']) && $_FILES['cover']['error'] == UPLOAD_ERR_OK) {
-            $coverName = basename($_FILES['cover']['name']);
-            $targetCover = $uploadDir . $coverName;
-            $coverType = strtolower(pathinfo($targetCover, PATHINFO_EXTENSION));
+            // Process cover image upload
+            $coverURL = null; // Use null for database if no cover
+            if (isset($_FILES['cover']) && $_FILES['cover']['error'] == UPLOAD_ERR_OK) {
+                $coverTmpPath = $_FILES['cover']['tmp_name'];
+                $coverOriginalName = basename($_FILES['cover']['name']);
+                $coverExtension = strtolower(pathinfo($coverOriginalName, PATHINFO_EXTENSION));
 
-            // Validate cover image type
-            if (!in_array($coverType, ['jpg', 'jpeg', 'png', 'gif'])) {
-                echo json_encode(array("error" => "Invalid cover image format"));
-                exit;
+                // MIME Type validation for cover
+                $coverMimeType = mime_content_type($coverTmpPath);
+                $allowedImageMimes = ['image/jpeg', 'image/png', 'image/gif'];
+                if (!in_array($coverMimeType, $allowedImageMimes)) {
+                    echo json_encode(array("error" => "Invalid cover image type. Allowed: JPEG, PNG, GIF. Detected: " . $coverMimeType));
+                    exit;
+                }
+                // Additional check for extension
+                $allowedImageExtensions = ['jpg', 'jpeg', 'png', 'gif'];
+                if (!in_array($coverExtension, $allowedImageExtensions)) {
+                     echo json_encode(array("error" => "Invalid cover image extension. Allowed: jpg, jpeg, png, gif."));
+                    exit;
+                }
+
+                $coverName = pathinfo($coverOriginalName, PATHINFO_FILENAME) . '_' . time() . '.' . $coverExtension;
+                $targetCover = $uploadDir . $coverName;
+
+                if (move_uploaded_file($coverTmpPath, $targetCover)) {
+                    $coverURL = $targetCover;
+                } else {
+                    // Optionally, handle cover upload failure more gracefully if a song can exist without a cover
+                     error_log("Cover upload failed for " . $coverOriginalName); // Log it but maybe don't exit
+                }
             }
-            if (move_uploaded_file($_FILES['cover']['tmp_name'], $targetCover)) {
-                $coverURL = $targetCover;
-            }
+
+            // Get additional data from the POST request
+            // Use null coalescing operator for defaults, ensure they are strings
+            $title = (string) ($_POST['title'] ?? pathinfo($songOriginalName, PATHINFO_FILENAME));
+            $artist = (string) ($_POST['artist'] ?? 'Unknown Artist');
+            $lyrics = (string) ($_POST['lyrics'] ?? '');
+
+            // Basic sanitization (trimming whitespace)
+            $title = trim($title);
+            $artist = trim($artist);
+            // Lyrics can be multi-line, so trim might be too aggressive depending on desired behavior
+            // $lyrics = trim($lyrics);
+
+
+            // Insert into database
+            $sql = "INSERT INTO songs (title, file, cover, artist, lyrics) VALUES (?, ?, ?, ?, ?)";
+            $stmt = $pdo->prepare($sql);
+            // The execute method returns true on success or false on failure.
+            // Errors will be caught by the catch block due to PDO::ERRMODE_EXCEPTION
+            $stmt->execute([$title, $songURL, $coverURL, $artist, $lyrics]);
+
+            // Get the last inserted ID
+            $lastId = $pdo->lastInsertId();
+            // Fetch the newly inserted song to return it (optional, but good for UX)
+            $selectStmt = $pdo->prepare("SELECT id, title, file, cover, artist, lyrics, DATE_FORMAT(uploaded_at, '%Y-%m-%d %H:%i:%s') as uploaded_at FROM songs WHERE id = ?");
+            $selectStmt->execute([$lastId]);
+            $newSong = $selectStmt->fetch();
+
+            echo json_encode(array("success" => "Song uploaded successfully", "song" => $newSong));
+        }
+        // If no valid action is provided
+        else {
+            // http_response_code(400); // Bad Request
+            // echo json_encode(array("error" => "Invalid action"));
         }
 
-        // Get additional data from the POST request
-        $title = $conn->real_escape_string($_POST['title'] ?? $songName);
-        $artist = $conn->real_escape_string($_POST['artist'] ?? 'Uploaded Artist');
-        $lyrics = $conn->real_escape_string($_POST['lyrics'] ?? '');
-
-        // Insert into database
-        $stmt = $conn->prepare("INSERT INTO songs (title, file, cover, artist, lyrics) VALUES (?, ?, ?, ?, ?)");
-        $stmt->bind_param("sssss", $title, $songURL, $coverURL, $artist, $lyrics);
-        if ($stmt->execute()) {
-            echo json_encode(array("success" => "Song uploaded successfully"));
-        } else {
-            echo json_encode(array("error" => "Database error: " . $conn->error));
-        }
-        $stmt->close();
-        $conn->close();
-        exit;
+    } catch (PDOException $e) {
+        // http_response_code(500); // Internal Server Error
+        // Log error to a file in a real application: error_log($e->getMessage());
+        echo json_encode(array("error" => "Database connection error: " . $e->getMessage()));
+    } catch (Exception $e) {
+        // http_response_code(500); // Internal Server Error
+        // Log error to a file: error_log($e->getMessage());
+        echo json_encode(array("error" => "An unexpected error occurred: " . $e->getMessage()));
+    } finally {
+        $pdo = null; // Close connection
     }
+    exit; // Important to stop script execution after handling API request
 }
 ?>
 <!DOCTYPE html>
@@ -103,7 +166,8 @@ if (isset($_GET['action'])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Neon Wave Music Player</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <title>Neon Wave Music Player - Accessible Music Experience</title>
     <style>
         :root {
             --color-primary: hsl(201, 63%, 54%);
@@ -315,7 +379,7 @@ if (isset($_GET['action'])) {
         .lyrics-container {
             max-height: 60vh;
             overflow-y: auto;
-            1.8;
+            line-height: 1.8; /* Corrected line-height */
             font-size: 1.1rem;
             text-align: center;
         }
@@ -416,34 +480,36 @@ if (isset($_GET['action'])) {
 </head>
 <body class="antialiased">
     <!-- Floating Background Visualizer -->
-    <div class="floating-visualizer">
+    <div class="floating-visualizer" aria-hidden="true">
         <div class="visualizer-circle" style="width: 300px; height: 300px; top: 10%; left: 10%;"></div>
         <div class="visualizer-circle" style="width: 200px; height: 200px; top: 60%; left: 70%;"></div>
         <div class="visualizer-circle" style="width: 400px; height: 400px; top: 30%; left: 50%;"></div>
     </div>
-    <div class="container mx-auto px-4 py-8 max-w-4xl">
+    <main class="container mx-auto px-4 py-8 max-w-4xl">
+        <h1 id="main-heading" class="sr-only">Neon Wave Music Player</h1> <!-- Screen-reader only main heading -->
         <!-- Player Section -->
-        <div class="glass-effect rounded-2xl p-6 neon-shadow mb-8">
+        <section class="glass-effect rounded-2xl p-6 neon-shadow mb-8" aria-labelledby="player-section-heading">
+            <h2 id="player-section-heading" class="sr-only">Music Player Controls and Display</h2>
             <div class="flex flex-col md:flex-row gap-6 player-container">
                 <!-- Album Art -->
                 <div class="w-full md:w-1/3 aspect-square rounded-xl overflow-hidden relative album-art">
                     <div id="coverArt" class="w-full h-full object-cover default-cover">
-                        <i class="fas fa-music text-5xl"></i>
+                        <i class="fas fa-music text-5xl" aria-hidden="true"></i>
                     </div>
-                    <div id="waveform" class="waveform absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent hidden">
+                    <div id="waveform" class="waveform absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent hidden" aria-hidden="true">
                         <!-- Waveform bars will be generated dynamically -->
                     </div>
-                    <div id="lyricsBtn" class="absolute top-2 right-2 bg-black/50 rounded-full w-8 h-8 flex items-center justify-center cursor-pointer hover:bg-black/70" title="Show Lyrics">
-                        <i class="fas fa-align-left text-sm"></i>
-                    </div>
+                    <button id="lyricsBtn" aria-label="Show lyrics" class="absolute top-2 right-2 bg-black/50 rounded-full w-8 h-8 flex items-center justify-center cursor-pointer hover:bg-black/70" title="Show Lyrics">
+                        <i class="fas fa-align-left text-sm" aria-hidden="true"></i>
+                    </button>
                 </div>
                 <!-- Player Controls -->
                 <div class="flex-1 flex flex-col controls">
                     <div class="mb-4">
-                        <h2 id="songTitle" class="text-2xl font-bold mb-1 neon-text truncate max-w-full">Select a song</h2>
-                        <p id="artist" class="text-white/70">-</p>
+                        <h2 id="songTitle" class="text-2xl font-bold mb-1 neon-text truncate max-w-full" aria-live="polite">Select a song</h2>
+                        <p id="artist" class="text-white/70" aria-live="polite">-</p>
                     </div>
-                    <div class="progress-bar mb-4" id="progressBar">
+                    <div class="progress-bar mb-4" id="progressBar" role="slider" aria-label="Song progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0:00 of 0:00">
                         <div id="progress" class="progress-fill w-0"></div>
                     </div>
                     <div class="flex items-center justify-between mb-4">
@@ -452,43 +518,43 @@ if (isset($_GET['action'])) {
                     </div>
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2">
-                            <button id="shuffleBtn" class="control-btn text-white/50 hover:text-white" title="Shuffle">
-                                <i class="fas fa-random text-lg"></i>
+                            <button id="shuffleBtn" aria-label="Shuffle playlist" class="control-btn text-white/50 hover:text-white" title="Shuffle">
+                                <i class="fas fa-random text-lg" aria-hidden="true"></i>
                             </button>
-                            <button id="prevBtn" class="control-btn p-2" title="Previous">
-                                <i class="fas fa-step-backward text-xl"></i>
+                            <button id="prevBtn" aria-label="Previous song" class="control-btn p-2" title="Previous">
+                                <i class="fas fa-step-backward text-xl" aria-hidden="true"></i>
                             </button>
                         </div>
-                        <button id="playBtn" class="control-btn bg-white/10 rounded-full w-14 h-14 flex items-center justify-center hover:bg-white/20 pulse" title="Play">
-                            <i class="fas fa-play text-2xl"></i>
+                        <button id="playBtn" aria-label="Play song" class="control-btn bg-white/10 rounded-full w-14 h-14 flex items-center justify-center hover:bg-white/20 pulse" title="Play">
+                            <i class="fas fa-play text-2xl" aria-hidden="true"></i>
                         </button>
                         <div class="flex items-center gap-2">
-                            <button id="nextBtn" class="control-btn p-2" title="Next">
-                                <i class="fas fa-step-forward text-xl"></i>
+                            <button id="nextBtn" aria-label="Next song" class="control-btn p-2" title="Next">
+                                <i class="fas fa-step-forward text-xl" aria-hidden="true"></i>
                             </button>
-                            <button id="repeatBtn" class="control-btn text-white/50 hover:text-white" title="Repeat">
-                                <i class="fas fa-redo text-lg"></i>
+                            <button id="repeatBtn" aria-label="Repeat playlist" class="control-btn text-white/50 hover:text-white" title="Repeat">
+                                <i class="fas fa-redo text-lg" aria-hidden="true"></i>
                             </button>
                         </div>
                     </div>
                     <div class="flex items-center gap-3 mt-4">
-                        <i class="fas fa-volume-down text-white/70"></i>
-                        <input type="range" id="volumeSlider" class="volume-slider" min="0" max="1" step="0.01" value="0.7">
-                        <i class="fas fa-volume-up text-white/70"></i>
+                        <i class="fas fa-volume-down text-white/70" aria-hidden="true"></i>
+                        <input type="range" id="volumeSlider" aria-label="Volume control" class="volume-slider" min="0" max="1" step="0.01" value="0.7">
+                        <i class="fas fa-volume-up text-white/70" aria-hidden="true"></i>
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
         <!-- Playlist + Upload -->
-        <div class="glass-effect rounded-2xl p-6 neon-shadow">
+        <section class="glass-effect rounded-2xl p-6 neon-shadow" aria-labelledby="playlist-heading">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-xl font-bold">Playlist</h3>
+                <h3 id="playlist-heading" class="text-xl font-bold">Playlist</h3>
                 <div class="flex gap-3">
-                    <button id="refreshBtn" class="bg-white/10 px-3 py-1 rounded-lg hover:bg-white/20" title="Refresh playlist">
-                        <i class="fas fa-sync-alt"></i>
+                    <button id="refreshBtn" aria-label="Refresh playlist" class="bg-white/10 px-3 py-1 rounded-lg hover:bg-white/20" title="Refresh playlist">
+                        <i class="fas fa-sync-alt" aria-hidden="true"></i>
                     </button>
-                    <button id="uploadBtn" class="upload-btn px-4 py-2 rounded-lg text-white font-medium flex items-center" title="Upload">
-                        <i class="fas fa-upload mr-2"></i>Upload
+                    <button id="uploadBtn" aria-label="Open upload modal" class="upload-btn px-4 py-2 rounded-lg text-white font-medium flex items-center" title="Upload">
+                        <i class="fas fa-upload mr-2" aria-hidden="true"></i>Upload
                     </button>
                 </div>
             </div>
@@ -497,75 +563,74 @@ if (isset($_GET['action'])) {
                 <ul id="playlist" class="space-y-2">
                     <!-- Playlist items will be added here dynamically -->
                     <li class="text-center py-10 text-white/50">
-                        <i class="fas fa-music text-3xl mb-2"></i>
+                        <i class="fas fa-music text-3xl mb-2" aria-hidden="true"></i>
                         <p>No songs in playlist</p>
                     </li>
                 </ul>
             </div>
-            <!-- Footer Credit -->
-            <div class="mt-4 text-center text-white/50 text-sm">
-                Made with <span class="text-red-400">❤️</span> by DK.
-            </div>
-        </div>
-    </div>
+            <footer class="mt-4 text-center text-white/50 text-sm">
+                Made with <span class="text-red-400" aria-hidden="true">❤️</span> by DK.
+            </footer>
+        </section>
+    </main>
     <!-- Floating Action Button -->
-    <div class="fab hidden" id="miniPlayer">
-        <i class="fas fa-music"></i>
-    </div>
+    <button class="fab hidden" id="miniPlayer" aria-label="Open mini player" title="Show Full Player">
+        <i class="fas fa-music" aria-hidden="true"></i>
+    </button>
     <!-- Upload Modal -->
-    <div id="uploadModal" class="fixed inset-0 hidden items-center justify-center z-50 modal-overlay">
+    <div id="uploadModal" class="fixed inset-0 hidden items-center justify-center z-50 modal-overlay" role="dialog" aria-modal="true" aria-labelledby="uploadModalHeading" aria-hidden="true">
         <div class="glass-effect rounded-2xl p-6 w-full max-w-md neon-shadow mx-4">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-xl font-bold">Upload New Song</h3>
-                <button id="cancelBtn" class="text-white/50 hover:text-white">
-                    <i class="fas fa-times text-xl"></i>
+                <h3 id="uploadModalHeading" class="text-xl font-bold">Upload New Song</h3>
+                <button id="cancelBtn" aria-label="Close upload modal" class="text-white/50 hover:text-white">
+                    <i class="fas fa-times text-xl" aria-hidden="true"></i>
                 </button>
             </div>
             <form id="uploadForm" class="space-y-4" enctype="multipart/form-data">
                 <div>
-                    <label class="block mb-2 text-sm font-medium">Song Title</label>
-                    <input type="text" name="title" required
+                    <label for="uploadTitle" class="block mb-2 text-sm font-medium">Song Title</label>
+                    <input type="text" id="uploadTitle" name="title" required aria-required="true"
                             class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30"
                             placeholder="Enter song title">
                 </div>
                 <div>
-                    <label class="block mb-2 text-sm font-medium">Artist</label>
-                    <input type="text" name="artist" required
+                    <label for="uploadArtist" class="block mb-2 text-sm font-medium">Artist</label>
+                    <input type="text" id="uploadArtist" name="artist" required aria-required="true"
                             class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30"
                             placeholder="Enter artist name">
                 </div>
                 <div>
-                    <label class="block mb-2 text-sm font-medium">Lyrics (Optional)</label>
-                    <textarea name="lyrics" rows="3"
+                    <label for="uploadLyrics" class="block mb-2 text-sm font-medium">Lyrics (Optional)</label>
+                    <textarea id="uploadLyrics" name="lyrics" rows="3"
                               class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30"
                               placeholder="Enter song lyrics"></textarea>
                 </div>
                 <div>
-                    <label class="block mb-2 text-sm font-medium">Cover Art (Optional)</label>
+                    <label class="block mb-2 text-sm font-medium">Cover Art (Optional)</label> <!-- No direct input, label for group -->
                     <div class="flex items-center gap-3">
                         <label for="coverInput" class="cursor-pointer bg-white/10 rounded-lg p-3 flex-1 text-center hover:bg-white/20">
-                            <i class="fas fa-image mr-2"></i>
+                            <i class="fas fa-image mr-2" aria-hidden="true"></i>
                             <span id="coverFileName">Choose cover image</span>
                             <input type="file" id="coverInput" name="cover" accept="image/*" class="hidden">
                         </label>
-                        <div id="coverPreview" class="w-16 h-16 bg-white/5 rounded-lg overflow-hidden hidden">
-                            <img id="coverPreviewImg" class="w-full h-full object-cover">
+                        <div id="coverPreview" class="w-16 h-16 bg-white/5 rounded-lg overflow-hidden hidden" aria-label="Cover art preview">
+                            <img id="coverPreviewImg" src="" alt="Cover preview" class="w-full h-full object-cover">
                         </div>
                     </div>
                 </div>
                 <div>
-                    <label class="block mb-2 text-sm font-medium">Song File (MP3)</label>
+                    <label for="songInput" class="block mb-2 text-sm font-medium">Song File (MP3)</label>
                     <label for="songInput" class="cursor-pointer bg-white/10 rounded-lg p-3 flex text-center hover:bg-white/20">
-                        <i class="fas fa-music mr-2"></i>
+                        <i class="fas fa-music mr-2" aria-hidden="true"></i>
                         <span id="songFileName">Choose MP3 file</span>
-                        <input type="file" id="songInput" name="song" accept="audio/mp3" required class="hidden">
+                        <input type="file" id="songInput" name="song" accept="audio/mp3" required aria-required="true" class="hidden">
                     </label>
                 </div>
                 <div class="flex gap-4 pt-2">
                     <button type="submit" class="flex-1 bg-white/10 px-4 py-3 rounded-lg hover:bg-white/20 font-medium flex items-center justify-center">
-                        <i class="fas fa-cloud-upload-alt mr-2"></i>Upload
+                        <i class="fas fa-cloud-upload-alt mr-2" aria-hidden="true"></i>Upload
                     </button>
-                    <button type="button" id="cancelUploadBtn" class="flex-1 bg-red-500/20 px-4 py-3 rounded-lg hover:bg-red-500/30 font-medium">
+                    <button type="button" id="cancelUploadBtn" aria-label="Cancel song upload" class="flex-1 bg-red-500/20 px-4 py-3 rounded-lg hover:bg-red-500/30 font-medium">
                         Cancel
                     </button>
                 </div>
@@ -573,12 +638,12 @@ if (isset($_GET['action'])) {
         </div>
     </div>
     <!-- Lyrics Modal -->
-    <div id="lyricsModal" class="fixed inset-0 hidden items-center justify-center z-50 modal-overlay">
+    <div id="lyricsModal" class="fixed inset-0 hidden items-center justify-center z-50 modal-overlay" role="dialog" aria-modal="true" aria-labelledby="lyricsModalHeading" aria-hidden="true">
         <div class="glass-effect rounded-2xl p-6 w-full max-w-md neon-shadow mx-4 max-h-[80vh] flex flex-col">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-xl font-bold">Lyrics</h3>
-                <button id="closeLyricsBtn" class="text-white/50 hover:text-white">
-                    <i class="fas fa-times text-xl"></i>
+                <h3 id="lyricsModalHeading" class="text-xl font-bold">Lyrics</h3>
+                <button id="closeLyricsBtn" aria-label="Close lyrics modal" class="text-white/50 hover:text-white">
+                    <i class="fas fa-times text-xl" aria-hidden="true"></i>
                 </button>
             </div>
             <div class="lyrics-container flex-1 overflow-y-auto py-2">
@@ -587,8 +652,9 @@ if (isset($_GET['action'])) {
         </div>
     </div>
     <!-- Notification Toast -->
-    <div id="toast" class="fixed bottom-4 right-4 p-4 rounded-lg shadow-lg hidden z-50"></div>
+    <div id="toast" role="alert" aria-live="assertive" class="fixed bottom-4 right-4 p-4 rounded-lg shadow-lg hidden z-50"></div>
     <script>
+        // Global Audio Object and State
         const audio = new Audio();
         let currentSongIndex = -1;
         let playlist = [];
@@ -602,486 +668,467 @@ if (isset($_GET['action'])) {
             isRepeating: false,
             volume: 0.7,
             timer: null,
-            isDraggingProgress: false
+            isDraggingProgress: false,
         };
 
-        // Player Elements
-        const playBtn = document.getElementById('playBtn');
-        const prevBtn = document.getElementById('prevBtn');
-        const nextBtn = document.getElementById('nextBtn');
-        const progress = document.getElementById('progress');
-        const progressBar = document.getElementById('progressBar');
-        const currentTimeDisplay = document.getElementById('currentTime');
-        const durationDisplay = document.getElementById('duration');
-        const songTitle = document.getElementById('songTitle');
-        const artist = document.getElementById('artist');
-        const coverArt = document.getElementById('coverArt');
-        const waveform = document.getElementById('waveform');
-        const volumeSlider = document.getElementById('volumeSlider');
-        const shuffleBtn = document.getElementById('shuffleBtn');
-        const repeatBtn = document.getElementById('repeatBtn');
-        const miniPlayer = document.getElementById('miniPlayer');
-        const lyricsBtn = document.getElementById('lyricsBtn');
-        const lyricsModal = document.getElementById('lyricsModal');
-        const lyricsText = document.getElementById('lyricsText');
-        const closeLyricsBtn = document.getElementById('closeLyricsBtn');
-        // Playlist Elements
-        const playlistElement = document.getElementById('playlist');
-        const refreshBtn = document.getElementById('refreshBtn');
-        // Upload Elements
-        const uploadModal = document.getElementById('uploadModal');
-        const uploadBtn = document.getElementById('uploadBtn');
-        const cancelBtn = document.getElementById('cancelBtn');
-        const cancelUploadBtn = document.getElementById('cancelUploadBtn');
-        const uploadForm = document.getElementById('uploadForm');
+        // DOM Elements
+        const UIElements = {
+            playBtn: document.getElementById('playBtn'),
+            prevBtn: document.getElementById('prevBtn'),
+            nextBtn: document.getElementById('nextBtn'),
+            progress: document.getElementById('progress'),
+            progressBar: document.getElementById('progressBar'),
+            currentTimeDisplay: document.getElementById('currentTime'),
+            durationDisplay: document.getElementById('duration'),
+            songTitle: document.getElementById('songTitle'),
+            artist: document.getElementById('artist'),
+            coverArt: document.getElementById('coverArt'),
+            waveform: document.getElementById('waveform'),
+            volumeSlider: document.getElementById('volumeSlider'),
+            shuffleBtn: document.getElementById('shuffleBtn'),
+            repeatBtn: document.getElementById('repeatBtn'),
+            miniPlayer: document.getElementById('miniPlayer'),
+            lyricsBtn: document.getElementById('lyricsBtn'),
+            lyricsModal: document.getElementById('lyricsModal'),
+            lyricsText: document.getElementById('lyricsText'),
+            closeLyricsBtn: document.getElementById('closeLyricsBtn'),
+            playlistElement: document.getElementById('playlist'),
+            refreshBtn: document.getElementById('refreshBtn'),
+            uploadModal: document.getElementById('uploadModal'),
+            uploadBtn: document.getElementById('uploadBtn'),
+            cancelBtn: document.getElementById('cancelBtn'),
+            cancelUploadBtn: document.getElementById('cancelUploadBtn'),
+            uploadForm: document.getElementById('uploadForm'),
+            coverInput: document.getElementById('coverInput'),
+            coverFileName: document.getElementById('coverFileName'),
+            coverPreview: document.getElementById('coverPreview'),
+            coverPreviewImg: document.getElementById('coverPreviewImg'),
+            songInput: document.getElementById('songInput'),
+            songFileName: document.getElementById('songFileName'),
+            toast: document.getElementById('toast'),
+        };
 
-        // Initialize player
+        // Initialization
         async function init() {
             await fetchPlaylist();
             updatePlaylistDisplay();
             createWaveformBars();
-            // Set up audio context on first user interaction
-            document.addEventListener('click', function initAudio() {
+            bindEventListeners();
+            setupAudioContextOnce();
+            audio.volume = state.volume;
+            if ('mediaSession' in navigator) {
+                UIElements.miniPlayer.classList.remove('hidden');
+                setupMediaSession();
+            }
+        }
+
+        function setupAudioContextOnce() {
+            const initAudio = () => {
                 try {
                     const AudioContext = window.AudioContext || window.webkitAudioContext;
                     audioContext = new AudioContext();
                     analyser = audioContext.createAnalyser();
-                    analyser.fftSize = 64;
+                    analyser.fftSize = 64; // Smaller FFT size for less detailed but faster waveform
                     dataArray = new Uint8Array(analyser.frequencyBinCount);
                     const source = audioContext.createMediaElementSource(audio);
                     source.connect(analyser);
                     analyser.connect(audioContext.destination);
                     visualize();
-                    document.removeEventListener('click', initAudio);
                 } catch (e) {
                     console.error("AudioContext error:", e);
+                    showNotification("Could not initialize audio visualizer.", true);
                 }
-            }, { once: true });
-            // Set initial volume
-            audio.volume = state.volume;
-            // Check for mini player support
-            if ('mediaSession' in navigator) {
-                miniPlayer.classList.remove('hidden');
-                setupMediaSession();
-            }
+            };
+            document.addEventListener('click', initAudio, { once: true });
         }
 
-        // Fetch playlist from PHP endpoint
+        // Playlist Management
         async function fetchPlaylist() {
+            UIElements.playlistElement.innerHTML = `
+                <li class="text-center py-10">
+                    <div class="spinner mx-auto mb-2"></div> <p>Loading playlist...</p>
+                </li>`;
             try {
-                // Show loading state
-                playlistElement.innerHTML = `
-                    <li class="text-center py-10">
-                        <div class="spinner mx-auto mb-2"></div>
-                        <p>Loading playlist...</p>
-                    </li>
-                `;
                 const response = await fetch('index.php?action=getPlaylist');
+                if (!response.ok) {
+                    let errorMsg = "Failed to load playlist. Server error.";
+                    try {
+                        const errorData = await response.json();
+                        errorMsg = errorData.error || errorMsg;
+                    } catch (e) { /* Ignore if error response is not JSON */ }
+                    throw new Error(errorMsg);
+                }
                 const data = await response.json();
                 if (Array.isArray(data)) {
                     playlist = data;
                 } else {
-                    console.error("Playlist fetch failed");
-                    showNotification("Failed to load playlist", true);
+                    console.error("Playlist data is not an array:", data);
+                    throw new Error("Received invalid playlist data from server.");
                 }
             } catch (error) {
                 console.error("Error fetching playlist:", error);
-                showNotification("Network error loading playlist", true);
+                playlist = []; // Ensure playlist is empty on error
+                showNotification(error.message || "Network error loading playlist.", true);
+            } finally {
+                updatePlaylistDisplay(); // Always update display, even if it's to show empty
             }
         }
 
-        // Update playlist display
-        function updatePlaylistDisplay() {
-            if (playlist.length === 0) {
-                playlistElement.innerHTML = `
-                    <li class="text-center py-10 text-white/50">
-                        <i class="fas fa-music text-3xl mb-2"></i>
-                        <p>No songs in playlist</p>
-                    </li>
-                `;
-                return;
-            }
-            playlistElement.innerHTML = playlist.map((song, index) => `
-                <li class="song-item bg-white/5 p-3 rounded-lg cursor-pointer hover:bg-white/10 transition-all ${currentSongIndex === index ? 'current-song' : ''}"
+        function createSongListItemHTML(song, index) {
+            const { title, artist: songArtist, cover, duration } = song; // Destructuring
+            const isActive = currentSongIndex === index;
+            return `
+                <li class="song-item bg-white/5 p-3 rounded-lg cursor-pointer hover:bg-white/10 transition-all ${isActive ? 'current-song' : ''}"
                      onclick="playSong(${index})">
                     <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-md overflow-hidden ${song.cover ? '' : 'default-cover'}">
-                            ${song.cover ?
-                                `<img src="${song.cover}" class="w-full h-full object-cover">` :
-                                `<i class="fas fa-music w-full h-full flex items-center justify-center"></i>`}
+                        <div class="w-10 h-10 rounded-md overflow-hidden ${cover ? '' : 'default-cover'}">
+                            ${cover ? `<img src="${cover}" class="w-full h-full object-cover">`
+                                   : `<i class="fas fa-music w-full h-full flex items-center justify-center"></i>`}
                         </div>
                         <div class="flex-1 min-w-0">
-                            <p class="font-medium truncate">${song.title}</p>
-                            <p class="text-sm text-white/70 truncate">${song.artist}</p>
+                            <p class="font-medium truncate">${title}</p>
+                            <p class="text-sm text-white/70 truncate">${songArtist}</p>
                         </div>
-                        <span class="text-xs text-white/50">${formatTime(song.duration)}</span>
+                        <span class="text-xs text-white/50">${formatTime(duration)}</span>
                     </div>
-                </li>
-            `).join('');
+                </li>`;
         }
 
-        // Helper function to format time
-        function formatTime(seconds) {
-            if (isNaN(seconds)) return "0:00";
+        function updatePlaylistDisplay() {
+            if (playlist.length === 0) {
+                UIElements.playlistElement.innerHTML = `
+                    <li class="text-center py-10 text-white/50">
+                        <i class="fas fa-music text-3xl mb-2"></i> <p>No songs in playlist</p>
+                    </li>`;
+                return;
+            }
+            UIElements.playlistElement.innerHTML = playlist.map(createSongListItemHTML).join('');
+        }
+
+        // Playback Controls
+        async function playSong(index) {
+            if (index < 0 || index >= playlist.length) return;
+            currentSongIndex = index;
+            const song = playlist[index];
+            const { title, artist: songArtist, cover, lyrics, file: songFile } = song; // Destructuring
+
+            UIElements.songTitle.textContent = title;
+            UIElements.artist.textContent = songArtist;
+            UIElements.songTitle.innerHTML = title.length > 20 ? `<span class="marquee">${title}</span>` : title;
+            UIElements.coverArt.innerHTML = cover ? `<img src="${cover}" class="w-full h-full object-cover">` : `<i class="fas fa-music text-5xl"></i>`;
+            UIElements.lyricsText.textContent = lyrics || "No lyrics available for this song.";
+
+            document.querySelectorAll('.song-item').forEach((item, i) => {
+                item.classList.toggle('current-song', i === index);
+            });
+
+            updateMediaSession(song);
+            audio.src = songFile;
+            audio.load();
+            try {
+                await audio.play();
+                UIElements.playBtn.innerHTML = '<i class="fas fa-pause text-2xl"></i>';
+                state.isPlaying = true;
+                UIElements.waveform.classList.remove('hidden');
+                UIElements.waveform.classList.add('playing');
+                showNotification(`Now playing: ${title}`);
+                UIElements.miniPlayer.innerHTML = `<i class="fas fa-pause"></i>`;
+            } catch (error) {
+                console.error("Play error:", error);
+                showNotification('Audio playback error. Click anywhere to try initializing audio.', true);
+            }
+        }
+
+        async function togglePlayPause() {
+            if (playlist.length === 0) {
+                showNotification('No songs in playlist.', true);
+                return;
+            }
+            if (currentSongIndex === -1) {
+                await playSong(0); // Play first song if none selected
+                return;
+            }
+            if (audio.paused) {
+                try {
+                    await audio.play();
+                    // UI updates handled by audio 'play' event listener
+                } catch (error) {
+                    console.error("Play error:", error);
+                    showNotification('Could not play audio.', true);
+                }
+            } else {
+                audio.pause();
+                // UI updates handled by audio 'pause' event listener
+            }
+        }
+
+        function prevSong() {
+            if (playlist.length === 0) return;
+            let newIndex = state.isShuffled ? Math.floor(Math.random() * playlist.length) : currentSongIndex - 1;
+            if (newIndex < 0) newIndex = playlist.length - 1;
+            playSong(newIndex);
+        }
+
+        function nextSong() {
+            if (playlist.length === 0) return;
+            let newIndex = state.isShuffled ? Math.floor(Math.random() * playlist.length) : currentSongIndex + 1;
+            if (newIndex >= playlist.length) newIndex = 0;
+            playSong(newIndex);
+        }
+
+        // UI Updates & Helpers
+        function formatTime(seconds = 0) { // Default parameter
+            if (isNaN(seconds)) seconds = 0;
             const mins = Math.floor(seconds / 60);
             const secs = Math.floor(seconds % 60);
             return `${mins}:${secs.toString().padStart(2, '0')}`;
         }
 
-        // Create waveform bars
-        function createWaveformBars() {
-            waveform.innerHTML = '';
-            waveformBars = [];
-            for (let i = 0; i < 16; i++) {
-                const bar = document.createElement('div');
-                bar.className = 'waveform-bar';
-                bar.style.animationDelay = `${i * 50}ms`;
-                waveform.appendChild(bar);
-                waveformBars.push(bar);
-            }
+        function updateTimeDisplay() {
+            if (isNaN(audio.duration) || state.isDraggingProgress) return;
+            const progressPercent = (audio.currentTime / audio.duration) * 100;
+            UIElements.progress.style.width = `${progressPercent}%`;
+            UIElements.currentTimeDisplay.textContent = formatTime(audio.currentTime);
+            UIElements.durationDisplay.textContent = formatTime(audio.duration);
+            UIElements.progressBar.setAttribute('aria-valuenow', progressPercent.toFixed(0));
+            UIElements.progressBar.setAttribute('aria-valuetext', `Song progress: ${formatTime(audio.currentTime)} of ${formatTime(audio.duration)}`);
         }
 
-        // Setup media session for mini player
+        function showNotification(message, isError = false) {
+            const { toast } = UIElements;
+            toast.textContent = message;
+            // Tailwind classes for base style, then add specific color and 'show'
+            toast.className = `fixed bottom-4 right-4 p-4 rounded-lg shadow-lg text-white ${
+                isError ? 'bg-red-500' : 'bg-green-500'
+            } show`;
+            clearTimeout(toast.timeoutId);
+            toast.timeoutId = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Media Session & Visualizer
         function setupMediaSession() {
+            if (!('mediaSession' in navigator)) return;
             navigator.mediaSession.setActionHandler('play', togglePlayPause);
             navigator.mediaSession.setActionHandler('pause', togglePlayPause);
             navigator.mediaSession.setActionHandler('previoustrack', prevSong);
             navigator.mediaSession.setActionHandler('nexttrack', nextSong);
-            miniPlayer.addEventListener('click', () => {
-                // Scroll to player
+            UIElements.miniPlayer.addEventListener('click', () => {
                 document.querySelector('.player-container').scrollIntoView({ behavior: 'smooth' });
             });
         }
 
-        // Update media session metadata
         function updateMediaSession(song) {
-            if (!('mediaSession' in navigator)) return;
+            if (!('mediaSession' in navigator) || !song) return;
+            const { title, artist: songArtist, cover } = song; // Destructuring
             navigator.mediaSession.metadata = new MediaMetadata({
-                title: song.title,
-                artist: song.artist,
-                artwork: song.cover ? [
-                    { src: song.cover, sizes: '96x96', type: 'image/jpeg' },
-                    { src: song.cover, sizes: '128x128', type: 'image/jpeg' },
-                    { src: song.cover, sizes: '192x192', type: 'image/jpeg' },
-                    { src: song.cover, sizes: '256x256', type: 'image/jpeg' },
-                    { src: song.cover, sizes: '384x384', type: 'image/jpeg' },
-                    { src: song.cover, sizes: '512x512', type: 'image/jpeg' }
+                title: title,
+                artist: songArtist,
+                artwork: cover ? [
+                    { src: cover, sizes: '96x96', type: 'image/jpeg' }, // Assuming JPEG, adjust if other types common
+                    { src: cover, sizes: '128x128', type: 'image/jpeg' },
+                    { src: cover, sizes: '192x192', type: 'image/jpeg' },
+                    { src: cover, sizes: '256x256', type: 'image/jpeg' },
+                    { src: cover, sizes: '384x384', type: 'image/jpeg' },
+                    { src: cover, sizes: '512x512', type: 'image/jpeg' }
                 ] : []
             });
         }
 
-        // Play song
-        async function playSong(index) {
-            if (index < 0 || index >= playlist.length) return;
-            currentSongIndex = index;
-            const song = playlist[index];
-            // Update UI
-            songTitle.textContent = song.title;
-            artist.textContent = song.artist;
-            // Handle long song titles with marquee effect
-            if (song.title.length > 20) {
-                songTitle.innerHTML = `<span class="marquee">${song.title}</span>`;
-            } else {
-                songTitle.textContent = song.title;
+        function createWaveformBars() {
+            UIElements.waveform.innerHTML = ''; // Clear existing bars
+            waveformBars = []; // Reset array
+            for (let i = 0; i < 16; i++) { // Number of bars
+                const bar = document.createElement('div');
+                bar.className = 'waveform-bar';
+                bar.style.animationDelay = `${i * 50}ms`; // Stagger animation
+                UIElements.waveform.appendChild(bar);
+                waveformBars.push(bar);
             }
-            if (song.cover) {
-                coverArt.innerHTML = `<img src="${song.cover}" class="w-full h-full object-cover">`;
-            } else {
-                coverArt.innerHTML = `<i class="fas fa-music text-5xl"></i>`;
+        }
+
+        function visualize() {
+            if (!analyser || !UIElements.waveform.classList.contains('playing')) {
+                // Stop visualization if not playing or analyser not ready
+                waveformBars.forEach(bar => bar.style.height = `10%`); // Reset bars
+                requestAnimationFrame(visualize); // Still need to keep the loop going
+                return;
             }
-            // Update lyrics
-            lyricsText.textContent = song.lyrics || "No lyrics available for this song.";
-            // Highlight current song in playlist
-            const songItems = document.querySelectorAll('.song-item');
-            songItems.forEach((item, i) => {
-                if (i === index) {
-                    item.classList.add('current-song');
-                } else {
-                    item.classList.remove('current-song');
+
+            analyser.getByteFrequencyData(dataArray);
+            waveformBars.forEach((bar, i) => {
+                const value = dataArray[i % dataArray.length] / 255; // Use modulo for safety if bars > dataArray.length
+                const height = 10 + (value * 90); // Scale height (10% to 100%)
+                bar.style.height = `${height}%`;
+            });
+            requestAnimationFrame(visualize);
+        }
+
+        // Event Handlers Setup
+        function bindEventListeners() {
+            UIElements.playBtn.addEventListener('click', togglePlayPause);
+            UIElements.prevBtn.addEventListener('click', prevSong);
+            UIElements.nextBtn.addEventListener('click', nextSong);
+
+            UIElements.shuffleBtn.addEventListener('click', () => {
+                state.isShuffled = !state.isShuffled;
+                UIElements.shuffleBtn.classList.toggle('text-white', state.isShuffled);
+                UIElements.shuffleBtn.classList.toggle('text-white/50', !state.isShuffled);
+                showNotification(state.isShuffled ? 'Shuffle on' : 'Shuffle off');
+                if (!state.isShuffled && playlist.length > 0) { // Optionally re-fetch or re-sort to original order
+                     fetchPlaylist().then(updatePlaylistDisplay); // Example: re-fetch
                 }
             });
-            // Update media session
-            updateMediaSession(song);
-            // Load and play audio
-            audio.src = song.file;
-            audio.load();
-            try {
-                await audio.play();
-                playBtn.innerHTML = '<i class="fas fa-pause text-2xl"></i>';
+
+            UIElements.repeatBtn.addEventListener('click', () => {
+                state.isRepeating = !state.isRepeating;
+                UIElements.repeatBtn.classList.toggle('text-white', state.isRepeating);
+                UIElements.repeatBtn.classList.toggle('text-white/50', !state.isRepeating);
+                showNotification(state.isRepeating ? 'Repeat on' : 'Repeat off');
+            });
+
+            UIElements.progressBar.addEventListener('click', (e) => {
+                if (isNaN(audio.duration)) return;
+                const rect = UIElements.progressBar.getBoundingClientRect();
+                const pos = (e.clientX - rect.left) / rect.width;
+                audio.currentTime = pos * audio.duration;
+            });
+
+            // Progress bar drag handling
+            const stopDragging = () => {
+                if (state.isDraggingProgress && !isNaN(audio.duration)) {
+                    const pos = parseFloat(UIElements.progress.style.width) / 100;
+                    audio.currentTime = pos * audio.duration;
+                    state.isDraggingProgress = false;
+                }
+            };
+            UIElements.progressBar.addEventListener('mousedown', () => { state.isDraggingProgress = true; });
+            document.addEventListener('mousemove', (e) => {
+                if (!state.isDraggingProgress || isNaN(audio.duration)) return;
+                const rect = UIElements.progressBar.getBoundingClientRect();
+                let pos = (e.clientX - rect.left) / rect.width;
+                pos = Math.min(Math.max(pos, 0), 1); // Clamp between 0 and 1
+                UIElements.progress.style.width = `${pos * 100}%`;
+                UIElements.currentTimeDisplay.textContent = formatTime(pos * audio.duration);
+            });
+            document.addEventListener('mouseup', stopDragging);
+            document.addEventListener('mouseleave', stopDragging); // Stop if mouse leaves window
+
+            audio.addEventListener('timeupdate', updateTimeDisplay);
+            audio.addEventListener('ended', () => { state.isRepeating ? playSong(currentSongIndex) : nextSong(); });
+            audio.addEventListener('play', () => {
+            UIElements.playBtn.innerHTML = '<i class="fas fa-pause text-2xl" aria-hidden="true"></i>';
+            UIElements.playBtn.setAttribute('aria-label', 'Pause song');
                 state.isPlaying = true;
-                waveform.classList.remove('hidden');
-                waveform.classList.add('playing');
-                showNotification(`Now playing: ${song.title}`);
-                // Update mini player
-                miniPlayer.innerHTML = `<i class="fas fa-pause"></i>`;
-            } catch (error) {
-                console.error("Play error:", error);
-                showNotification('Click anywhere to play', true);
-            }
+                UIElements.waveform.classList.add('playing');
+            UIElements.miniPlayer.innerHTML = `<i class="fas fa-pause" aria-hidden="true"></i>`;
+            });
+            audio.addEventListener('pause', () => {
+            UIElements.playBtn.innerHTML = '<i class="fas fa-play text-2xl" aria-hidden="true"></i>';
+            UIElements.playBtn.setAttribute('aria-label', 'Play song');
+                state.isPlaying = false;
+                UIElements.waveform.classList.remove('playing');
+            UIElements.miniPlayer.innerHTML = `<i class="fas fa-play" aria-hidden="true"></i>`;
+            });
+
+            UIElements.volumeSlider.addEventListener('input', (e) => {
+                audio.volume = e.target.value;
+                state.volume = e.target.value;
+            e.target.setAttribute('aria-valuetext', `Volume: ${Math.round(e.target.value * 100)}%`);
+            });
+        // Set initial aria-valuetext for volume slider
+        UIElements.volumeSlider.setAttribute('aria-valuetext', `Volume: ${Math.round(UIElements.volumeSlider.value * 100)}%`);
+
+
+            // Modal Controls
+        const openModal = (modalElement) => {
+            modalElement.style.display = 'flex';
+            modalElement.setAttribute('aria-hidden', 'false');
+            // Focus on the first focusable element in the modal if available
+            const focusable = modalElement.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+            if (focusable) focusable.focus();
+        };
+        const closeModal = (modalElement) => {
+            modalElement.style.display = 'none';
+            modalElement.setAttribute('aria-hidden', 'true');
+        };
+
+        UIElements.lyricsBtn.addEventListener('click', () => { openModal(UIElements.lyricsModal); });
+        UIElements.closeLyricsBtn.addEventListener('click', () => { closeModal(UIElements.lyricsModal); });
+        UIElements.uploadBtn.addEventListener('click', () => { openModal(UIElements.uploadModal); });
+        UIElements.cancelBtn.addEventListener('click', () => { closeModal(UIElements.uploadModal); });
+        UIElements.cancelUploadBtn.addEventListener('click', () => { closeModal(UIElements.uploadModal); });
+
+            // File Input Handlers
+            UIElements.coverInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                UIElements.coverFileName.textContent = file.name;
+                UIElements.coverPreview.classList.remove('hidden');
+                const reader = new FileReader();
+                reader.onload = (event) => { UIElements.coverPreviewImg.src = event.target.result; };
+                reader.readAsDataURL(file);
+            });
+            UIElements.songInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                UIElements.songFileName.textContent = file.name;
+                // Optional: const tempAudio = new Audio(URL.createObjectURL(file)); tempAudio.onloadedmetadata = () => { console.log(tempAudio.duration); /* store if needed */ };
+            });
+
+            // Upload Form Submission
+            UIElements.uploadForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const submitBtn = e.target.querySelector('button[type="submit"]');
+                const originalText = submitBtn.innerHTML;
+                submitBtn.innerHTML = '<div class="spinner mr-2"></div> Uploading...';
+                submitBtn.disabled = true;
+
+                const formData = new FormData(e.target);
+                try {
+                    const response = await fetch('index.php?action=uploadSong', { method: 'POST', body: formData });
+                    const result = await response.json();
+
+                    if (!response.ok) { // Check for HTTP errors (4xx, 5xx)
+                        throw new Error(result.error || `Server error: ${response.status}`);
+                    }
+
+                    if (result.success && result.song) {
+                        playlist.push(result.song);
+                        updatePlaylistDisplay(); // Refresh playlist display
+                        UIElements.uploadModal.style.display = 'none';
+                        UIElements.uploadForm.reset();
+                        UIElements.coverPreview.classList.add('hidden');
+                        UIElements.coverFileName.textContent = 'Choose cover image';
+                        UIElements.songFileName.textContent = 'Choose MP3 file';
+                        showNotification('Song uploaded successfully!');
+                    } else {
+                        // Server responded with success:false or missing song data
+                        throw new Error(result.error || 'Upload failed due to an unknown server issue.');
+                    }
+                } catch (error) {
+                    console.error("Upload error:", error);
+                    showNotification(error.message || 'Network error or server unavailable.', true);
+                } finally {
+                    submitBtn.innerHTML = originalText;
+                    submitBtn.disabled = false;
+                }
+            });
+
+            UIElements.refreshBtn.addEventListener('click', async () => {
+                UIElements.refreshBtn.innerHTML = '<i class="fas fa-sync-alt animate-spin"></i>';
+                await fetchPlaylist();
+                // updatePlaylistDisplay is called in fetchPlaylist's finally block
+                UIElements.refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+                showNotification('Playlist refreshed');
+            });
         }
 
-        // Toggle play/pause
-async function togglePlayPause() {
-    if (playlist.length === 0) {
-        showNotification('No songs in playlist', true);
-        return;
-    }
-    if (currentSongIndex === -1) {
-        await playSong(0);
-        return;
-    }
-    if (audio.paused) {
-        try {
-            await audio.play();
-            playBtn.innerHTML = '<i class="fas fa-pause text-2xl"></i>';
-            state.isPlaying = true;
-            waveform.classList.add('playing');
-            miniPlayer.innerHTML = `<i class="fas fa-pause"></i>`;
-        } catch (error) {
-            console.error("Play error:", error);
-            showNotification('Click anywhere to play', true);
-        }
-    } else {
-        audio.pause();
-        playBtn.innerHTML = '<i class="fas fa-play text-2xl"></i>';
-        state.isPlaying = false;
-        waveform.classList.remove('playing');
-        miniPlayer.innerHTML = `<i class="fas fa-play"></i>`;
-    }
-}
-// Previous song
-function prevSong() {
-    if (playlist.length === 0) return;
-    let newIndex = currentSongIndex - 1;
-    if (newIndex < 0) newIndex = playlist.length - 1;
-    playSong(newIndex);
-}
-// Next song
-function nextSong() {
-    if (playlist.length === 0) return;
-    let newIndex = currentSongIndex + 1;
-    if (newIndex >= playlist.length) newIndex = 0;
-    playSong(newIndex);
-}
-// Toggle shuffle
-function toggleShuffle() {
-    state.isShuffled = !state.isShuffled;
-    shuffleBtn.classList.toggle('text-white', state.isShuffled);
-    shuffleBtn.classList.toggle('text-white/50', !state.isShuffled);
-    if (state.isShuffled) {
-        // Shuffle the playlist (except current song)
-        const currentSong = playlist[currentSongIndex];
-        const shuffledPlaylist = [...playlist];
-        shuffledPlaylist.splice(currentSongIndex, 1);
-        // Fisher-Yates shuffle algorithm
-        for (let i = shuffledPlaylist.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [shuffledPlaylist[i], shuffledPlaylist[j]] = [shuffledPlaylist[j], shuffledPlaylist[i]];
-        }
-        // Reinsert current song at the beginning
-        shuffledPlaylist.unshift(currentSong);
-        playlist = shuffledPlaylist;
-        currentSongIndex = 0;
-        updatePlaylistDisplay();
-        showNotification('Playlist shuffled');
-    } else {
-        // Fetch fresh playlist from server
-        fetchPlaylist().then(() => {
-            updatePlaylistDisplay();
-            currentSongIndex = playlist.findIndex(song => song.title === songTitle.textContent);
-            showNotification('Shuffle off');
-        });
-    }
-}
-// Toggle repeat
-function toggleRepeat() {
-    state.isRepeating = !state.isRepeating;
-    repeatBtn.classList.toggle('text-white', state.isRepeating);
-    repeatBtn.classList.toggle('text-white/50', !state.isRepeating);
-    showNotification(state.isRepeating ? 'Repeat on' : 'Repeat off');
-}
-// Update progress bar and time display
-function updateTimeDisplay() {
-    if (isNaN(audio.duration) || state.isDraggingProgress) return;
-    const progressPercent = (audio.currentTime / audio.duration) * 100;
-    progress.style.width = `${progressPercent}%`;
-    currentTimeDisplay.textContent = formatTime(audio.currentTime);
-    durationDisplay.textContent = formatTime(audio.duration);
-}
-// Visualizer
-function visualize() {
-    function draw() {
-        requestAnimationFrame(draw);
-        if (!analyser || !waveform) return;
-        analyser.getByteFrequencyData(dataArray);
-        waveformBars.forEach((bar, i) => {
-            const value = dataArray[i] / 255;
-            const height = 10 + (value * 50);
-            bar.style.height = `${height}%`;
-        });
-    }
-    draw();
-}
-// Show notification toast
-function showNotification(message, isError = false) {
-    const toast = document.getElementById('toast');
-    toast.textContent = message;
-    toast.className = `fixed bottom-4 right-4 p-4 rounded-lg shadow-lg ${
-        isError ? 'bg-red-500' : 'bg-green-500'
-    } text-white`;
-    // Add show class
-    toast.classList.add('show');
-    // Remove after delay
-    clearTimeout(toast.timeoutId);
-    toast.timeoutId = setTimeout(() => {
-        toast.classList.remove('show');
-    }, 3000);
-}
-// Event Listeners
-playBtn.addEventListener('click', togglePlayPause);
-prevBtn.addEventListener('click', prevSong);
-nextBtn.addEventListener('click', nextSong);
-shuffleBtn.addEventListener('click', toggleShuffle);
-repeatBtn.addEventListener('click', toggleRepeat);
-// Progress bar click to seek
-progressBar.addEventListener('click', (e) => {
-    if (isNaN(audio.duration)) return;
-    const rect = progressBar.getBoundingClientRect();
-    const pos = (e.clientX - rect.left) / rect.width;
-    audio.currentTime = pos * audio.duration;
-});
-// Progress bar drag
-progressBar.addEventListener('mousedown', () => {
-    state.isDraggingProgress = true;
-});
-document.addEventListener('mousemove', (e) => {
-    if (state.isDraggingProgress && !isNaN(audio.duration)) {
-        const rect = progressBar.getBoundingClientRect();
-        const pos = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
-        progress.style.width = `${pos * 100}%`;
-        currentTimeDisplay.textContent = formatTime(pos * audio.duration);
-    }
-});
-document.addEventListener('mouseup', () => {
-    if (state.isDraggingProgress && !isNaN(audio.duration)) {
-        const pos = parseFloat(progress.style.width) / 100;
-        audio.currentTime = pos * audio.duration;
-        state.isDraggingProgress = false;
-    }
-});
-audio.addEventListener('timeupdate', updateTimeDisplay);
-audio.addEventListener('ended', () => {
-    if (state.isRepeating) {
-        audio.currentTime = 0;
-        audio.play();
-    } else {
-        nextSong();
-    }
-});
-audio.addEventListener('play', () => {
-    playBtn.innerHTML = '<i class="fas fa-pause text-2xl"></i>';
-    state.isPlaying = true;
-    waveform.classList.add('playing');
-    miniPlayer.innerHTML = `<i class="fas fa-pause"></i>`;
-});
-audio.addEventListener('pause', () => {
-    playBtn.innerHTML = '<i class="fas fa-play text-2xl"></i>';
-    state.isPlaying = false;
-    waveform.classList.remove('playing');
-    miniPlayer.innerHTML = `<i class="fas fa-play"></i>`;
-});
-volumeSlider.addEventListener('input', (e) => {
-    audio.volume = e.target.value;
-    state.volume = e.target.value;
-});
-// Lyrics modal
-lyricsBtn.addEventListener('click', () => {
-    lyricsModal.style.display = 'flex';
-});
-closeLyricsBtn.addEventListener('click', () => {
-    lyricsModal.style.display = 'none';
-});
-// Upload modal handling
-uploadBtn.addEventListener('click', () => {
-    uploadModal.style.display = 'flex';
-});
-cancelBtn.addEventListener('click', () => {
-    uploadModal.style.display = 'none';
-});
-cancelUploadBtn.addEventListener('click', () => {
-    uploadModal.style.display = 'none';
-});
-// Handle file selection for cover
-document.getElementById('coverInput').addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    document.getElementById('coverFileName').textContent = file.name;
-    document.getElementById('coverPreview').classList.remove('hidden');
-    const reader = new FileReader();
-    reader.onload = (event) => {
-        document.getElementById('coverPreviewImg').src = event.target.result;
-    };
-    reader.readAsDataURL(file);
-});
-// Handle file selection for song
-document.getElementById('songInput').addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    document.getElementById('songFileName').textContent = file.name;
-    // Try to extract duration
-    const audio = new Audio();
-    audio.src = URL.createObjectURL(file);
-    audio.addEventListener('loadedmetadata', () => {
-        console.log("Duration:", audio.duration);
-    });
-});
-// Handle form submission
-uploadForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const submitBtn = e.target.querySelector('button[type="submit"]');
-    const originalText = submitBtn.innerHTML;
-    submitBtn.innerHTML = '<div class="spinner mr-2"></div> Uploading...';
-    submitBtn.disabled = true;
-    const formData = new FormData(e.target);
-    try {
-        const response = await fetch('index.php?action=uploadSong', {
-            method: 'POST',
-            body: formData
-        });
-        const result = await response.json();
-        if (result.success) {
-            playlist.push(result.song);
-            updatePlaylistDisplay();
-            uploadModal.style.display = 'none';
-            uploadForm.reset();
-            document.getElementById('coverPreview').classList.add('hidden');
-            document.getElementById('coverFileName').textContent = 'Choose cover image';
-            document.getElementById('songFileName').textContent = 'Choose MP3 file';
-            showNotification('Song added to playlist!');
-        } else {
-            showNotification(result.error || 'Upload failed', true);
-        }
-    } catch (error) {
-        console.error("Upload error:", error);
-        showNotification('Network error during upload', true);
-    } finally {
-        submitBtn.innerHTML = originalText;
-        submitBtn.disabled = false;
-    }
-});
-// Refresh playlist
-refreshBtn.addEventListener('click', async () => {
-    refreshBtn.innerHTML = '<i class="fas fa-sync-alt animate-spin"></i>';
-    await fetchPlaylist();
-    updatePlaylistDisplay();
-    refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
-    showNotification('Playlist refreshed');
-});
-// Initialize on load
-window.addEventListener('DOMContentLoaded', init);
-// Expose functions to global scope for inline event handlers
-window.playSong = playSong;
-
-</script>
+        // Global Event Listener
+        window.addEventListener('DOMContentLoaded', init);
+        // Expose playSong globally for inline onclick attributes in playlist items
+        window.playSong = playSong;
+    </script>
 </body>
 </html>
