@@ -1,5 +1,14 @@
 <?php
+<?php
 require_once 'config.php'; // Include the configuration file
+
+// Helper function to send JSON responses
+function sendJsonResponse($data, $statusCode = 200) {
+    http_response_code($statusCode);
+    header('Content-Type: application/json');
+    echo json_encode($data);
+    exit;
+}
 
 // index.php
 // Database configuration is now in config.php
@@ -28,21 +37,17 @@ if (isset($_GET['action'])) {
             $sql = "SELECT id, title, file, cover, artist, lyrics, album, track_order, DATE_FORMAT(uploaded_at, '%Y-%m-%d %H:%i:%s') AS uploaded_at FROM songs ORDER BY track_order ASC, id ASC";
             $stmt = $pdo->query($sql);
             $songs = $stmt->fetchAll();
-            echo json_encode($songs);
+            sendJsonResponse($songs);
         }
 
         // Upload song endpoint
         elseif ($action === 'uploadSong') {
-            header("Content-Type: application/json");
-
             // Process song file upload
             if (isset($_FILES['song']) && $_FILES['song']['error'] == UPLOAD_ERR_OK) {
                 // $uploadDir is now defined in config.php
                 if (!is_dir($uploadDir)) {
-                    // Changed permissions from 0777 to 0755
                     if (!mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
-                        echo json_encode(array("error" => "Failed to create upload directory."));
-                        exit;
+                        sendJsonResponse(["error" => "Failed to create upload directory."], 500);
                     }
                 }
 
@@ -50,51 +55,40 @@ if (isset($_GET['action'])) {
                 $songOriginalName = basename($_FILES['song']['name']);
                 $songExtension = strtolower(pathinfo($songOriginalName, PATHINFO_EXTENSION));
 
-                // MIME Type validation for song
                 $songMimeType = mime_content_type($songTmpPath);
                 if ($songMimeType !== 'audio/mpeg' && $songMimeType !== 'audio/mp3') {
-                    echo json_encode(array("error" => "Invalid song file type. Only MP3 audio is allowed. Detected: " . $songMimeType));
-                    exit;
+                    sendJsonResponse(["error" => "Invalid song file type. Only MP3 audio is allowed. Detected: " . $songMimeType], 400);
                 }
-                // Additional check for extension, though MIME is primary
                 if ($songExtension !== "mp3") {
-                    echo json_encode(array("error" => "Invalid song file extension. Only .mp3 is allowed."));
-                    exit;
+                    sendJsonResponse(["error" => "Invalid song file extension. Only .mp3 is allowed."], 400);
                 }
 
                 $songName = pathinfo($songOriginalName, PATHINFO_FILENAME) . '_' . time() . '.' . $songExtension;
                 $targetSong = $uploadDir . $songName;
 
-                if (move_uploaded_file($songTmpPath, $targetSong)) {
-                    $songURL = $targetSong;
-                } else {
-                    echo json_encode(array("error" => "Song upload failed, could not move file. Check permissions or file size."));
-                    exit;
+                if (!move_uploaded_file($songTmpPath, $targetSong)) {
+                    sendJsonResponse(["error" => "Song upload failed, could not move file. Check permissions or file size."], 500);
                 }
+                $songURL = $targetSong;
             } else {
-                echo json_encode(array("error" => "No song file provided"));
-                exit;
+                sendJsonResponse(["error" => "No song file provided or upload error."], 400);
             }
 
             // Process cover image upload
-            $coverURL = null; // Use null for database if no cover
+            $coverURL = null;
             if (isset($_FILES['cover']) && $_FILES['cover']['error'] == UPLOAD_ERR_OK) {
                 $coverTmpPath = $_FILES['cover']['tmp_name'];
                 $coverOriginalName = basename($_FILES['cover']['name']);
                 $coverExtension = strtolower(pathinfo($coverOriginalName, PATHINFO_EXTENSION));
 
-                // MIME Type validation for cover
                 $coverMimeType = mime_content_type($coverTmpPath);
                 $allowedImageMimes = ['image/jpeg', 'image/png', 'image/gif'];
                 if (!in_array($coverMimeType, $allowedImageMimes)) {
-                    echo json_encode(array("error" => "Invalid cover image type. Allowed: JPEG, PNG, GIF. Detected: " . $coverMimeType));
-                    exit;
+                    sendJsonResponse(["error" => "Invalid cover image type. Allowed: JPEG, PNG, GIF. Detected: " . $coverMimeType], 400);
                 }
-                // Additional check for extension
                 $allowedImageExtensions = ['jpg', 'jpeg', 'png', 'gif'];
                 if (!in_array($coverExtension, $allowedImageExtensions)) {
-                     echo json_encode(array("error" => "Invalid cover image extension. Allowed: jpg, jpeg, png, gif."));
-                    exit;
+                     sendJsonResponse(["error" => "Invalid cover image extension. Allowed: jpg, jpeg, png, gif."], 400);
                 }
 
                 $coverName = pathinfo($coverOriginalName, PATHINFO_FILENAME) . '_' . time() . '.' . $coverExtension;
@@ -103,149 +97,100 @@ if (isset($_GET['action'])) {
                 if (move_uploaded_file($coverTmpPath, $targetCover)) {
                     $coverURL = $targetCover;
                 } else {
-                    // Optionally, handle cover upload failure more gracefully if a song can exist without a cover
-                     error_log("Cover upload failed for " . $coverOriginalName); // Log it but maybe don't exit
+                     error_log("Cover upload failed for " . $coverOriginalName . " but proceeding without cover.");
                 }
             }
 
-            // Get additional data from the POST request
-            // Use null coalescing operator for defaults, ensure they are strings
-            $title = (string) ($_POST['title'] ?? pathinfo($songOriginalName, PATHINFO_FILENAME));
-            $artist = (string) ($_POST['artist'] ?? 'Unknown Artist');
-            $lyrics = (string) ($_POST['lyrics'] ?? '');
+            $title = trim((string) ($_POST['title'] ?? pathinfo($songOriginalName, PATHINFO_FILENAME)));
+            $artist = trim((string) ($_POST['artist'] ?? 'Unknown Artist'));
+            $lyrics = (string) ($_POST['lyrics'] ?? ''); // Trim handled by client if needed, or here
             $album = isset($_POST['album']) ? trim((string)$_POST['album']) : null;
+            if (empty($album)) $album = null;
 
-            // Basic sanitization (trimming whitespace)
-            $title = trim($title);
-            $artist = trim($artist);
-            if ($album !== null) {
-                $album = trim($album);
-                if (empty($album)) $album = null; // Set to null if album string is empty after trim
-            }
-            // Lyrics can be multi-line, so trim might be too aggressive depending on desired behavior
-            // $lyrics = trim($lyrics);
+            if (empty($title)) sendJsonResponse(['error' => 'Title cannot be empty.'], 400);
+            if (empty($artist)) sendJsonResponse(['error' => 'Artist cannot be empty.'], 400);
 
-
-            // Insert into database
             $sql = "INSERT INTO songs (title, file, cover, artist, lyrics, album) VALUES (?, ?, ?, ?, ?, ?)";
             $stmt = $pdo->prepare($sql);
-            // The execute method returns true on success or false on failure.
-            // Errors will be caught by the catch block due to PDO::ERRMODE_EXCEPTION
             $stmt->execute([$title, $songURL, $coverURL, $artist, $lyrics, $album]);
 
-            // Get the last inserted ID
             $lastId = $pdo->lastInsertId();
-            // Fetch the newly inserted song to return it (optional, but good for UX)
             $selectStmt = $pdo->prepare("SELECT id, title, file, cover, artist, lyrics, album, track_order, DATE_FORMAT(uploaded_at, '%Y-%m-%d %H:%i:%s') as uploaded_at FROM songs WHERE id = ?");
             $selectStmt->execute([$lastId]);
             $newSong = $selectStmt->fetch();
 
-            echo json_encode(array("success" => "Song uploaded successfully", "song" => $newSong));
+            sendJsonResponse(["success" => "Song uploaded successfully", "song" => $newSong]);
         }
 
         elseif ($action === 'updatePlaylistOrder') {
-            header("Content-Type: application/json");
             $input = json_decode(file_get_contents('php://input'), true);
             $songIds = $input['songIds'] ?? null;
 
             if (!is_array($songIds) || empty($songIds)) {
-                http_response_code(400); // Bad Request
-                echo json_encode(['error' => 'Invalid input. songIds must be a non-empty array.']);
-                exit;
+                sendJsonResponse(['error' => 'Invalid input. songIds must be a non-empty array.'], 400);
             }
 
+            $pdo->beginTransaction();
             try {
-                $pdo->beginTransaction();
                 $sql = "UPDATE songs SET track_order = ? WHERE id = ?";
                 $stmt = $pdo->prepare($sql);
 
                 foreach ($songIds as $index => $songId) {
-                    if (!is_numeric($songId) || $songId <= 0) {
-                        throw new Exception("Invalid song ID: " . $songId);
+                    if (!is_numeric($songId) || (int)$songId <= 0) { // Ensure positive integer
+                        throw new Exception("Invalid song ID format or value: " . $songId);
                     }
                     $stmt->execute([$index, (int)$songId]);
                 }
                 $pdo->commit();
-                echo json_encode(['success' => 'Playlist order updated successfully.']);
-
-            } catch (PDOException $e) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                http_response_code(500); // Internal Server Error
-                error_log("PDO Error updating playlist order: " . $e->getMessage());
-                echo json_encode(['error' => 'Database error while updating order.']);
-            } catch (Exception $e) { // Catch other exceptions like invalid song ID
+                sendJsonResponse(['success' => 'Playlist order updated successfully.']);
+            } catch (Exception $e) {
                  if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-                http_response_code(400); // Bad Request
                 error_log("Error updating playlist order: " . $e->getMessage());
-                echo json_encode(['error' => $e->getMessage()]);
+                sendJsonResponse(['error' => $e->getMessage()], ($e instanceof PDOException ? 500 : 400) );
             }
-            // $pdo is nullified in the main finally block
         }
 
         elseif ($action === 'updateSongMetadata') {
-            header("Content-Type: application/json");
             $input = json_decode(file_get_contents('php://input'), true);
 
-            $songId = filter_var($input['songId'] ?? null, FILTER_VALIDATE_INT);
+            $songId = filter_var($input['songId'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
             $title = trim((string)($input['title'] ?? ''));
             $artist = trim((string)($input['artist'] ?? ''));
             $album = isset($input['album']) ? trim((string)$input['album']) : null;
             if (empty($album)) $album = null;
 
-
-            if (!$songId || $songId <= 0) {
-                http_response_code(400);
-                echo json_encode(['error' => 'Invalid Song ID.']);
-                exit;
+            if (!$songId) {
+                sendJsonResponse(['error' => 'Invalid Song ID.'], 400);
             }
             if (empty($title)) {
-                http_response_code(400);
-                echo json_encode(['error' => 'Title cannot be empty.']);
-                exit;
+                sendJsonResponse(['error' => 'Title cannot be empty.'], 400);
             }
             if (empty($artist)) {
-                http_response_code(400);
-                echo json_encode(['error' => 'Artist cannot be empty.']);
-                exit;
+                sendJsonResponse(['error' => 'Artist cannot be empty.'], 400);
             }
 
-            try {
-                $sql = "UPDATE songs SET title = ?, artist = ?, album = ? WHERE id = ?";
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute([$title, $artist, $album, $songId]);
+            $sql = "UPDATE songs SET title = ?, artist = ?, album = ? WHERE id = ?";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$title, $artist, $album, $songId]);
 
-                if ($stmt->rowCount() > 0) {
-                    echo json_encode(['success' => 'Song metadata updated successfully.']);
-                } else {
-                    // Potentially, no rows were affected, which could mean the songId didn't exist OR values were the same.
-                    // For simplicity, we'll treat it as success if no error, but one could check song existence first.
-                    echo json_encode(['success' => 'Metadata updated (or values were the same). No rows changed.']);
-                }
-            } catch (PDOException $e) {
-                http_response_code(500);
-                error_log("PDO Error updating song metadata: " . $e->getMessage());
-                echo json_encode(['error' => 'Database error while updating metadata.']);
+            if ($stmt->rowCount() > 0) {
+                sendJsonResponse(['success' => 'Song metadata updated successfully.']);
+            } else {
+                sendJsonResponse(['success' => 'Metadata updated (or values were the same). No rows changed.']);
             }
-            // $pdo is nullified in the main finally block
         }
-        // If no valid action is provided
         else {
-            http_response_code(400); // Bad Request
-            echo json_encode(array("error" => "Invalid action specified."));
+            sendJsonResponse(["error" => "Invalid action specified."], 400);
         }
 
     } catch (PDOException $e) {
-        // http_response_code(500); // Internal Server Error
-        // Log error to a file in a real application: error_log($e->getMessage());
-        echo json_encode(array("error" => "Database connection error: " . $e->getMessage()));
+        error_log("PDO Exception: " . $e->getMessage());
+        sendJsonResponse(["error" => "Database connection error: " . $e->getMessage()], 500);
     } catch (Exception $e) {
-        // http_response_code(500); // Internal Server Error
-        // Log error to a file: error_log($e->getMessage());
-        echo json_encode(array("error" => "An unexpected error occurred: " . $e->getMessage()));
+        error_log("General Exception: " . $e->getMessage());
+        sendJsonResponse(["error" => "An unexpected error occurred: " . $e->getMessage()], 500);
     } finally {
         $pdo = null; // Close connection
     }
@@ -262,46 +207,91 @@ if (isset($_GET['action'])) {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
     <title>Neon Wave Music Player - Accessible Music Experience</title>
     <style>
-        :root {
+        :root { /* Default to dark theme variables */
             --color-primary: hsl(201, 63%, 54%);
             --color-secondary: hsl(261, 77%, 57%);
             --color-accent: hsl(21, 88%, 78%);
-            --color-background: hsl(51, 86%, 78%);
-            --color-text: hsl(81, 84%, 75%);
-            --color-dark: hsl(220, 13%, 18%);
+            /* --color-background: hsl(51, 86%, 78%); /* Not directly used for body anymore */
+            /* --color-text: hsl(81, 84%, 75%); /* Not directly used for body anymore */
+            --color-dark-bg-start: hsl(220, 13%, 18%); /* For gradient if needed, or base */
+            --color-dark-bg-end: hsl(220, 13%, 25%); /* For gradient if needed */
             --color-success: hsl(145, 63%, 49%);
             --color-error: hsl(0, 82%, 68%);
+
+            --color-background-body: hsl(220, 13%, 18%);
+            --color-text-body: white;
+            --color-text-muted: rgba(255, 255, 255, 0.7);
+            --color-text-muted-light: rgba(255, 255, 255, 0.5);
+            --color-glass-bg: rgba(255, 255, 255, 0.08);
+            --color-glass-border: rgba(255, 255, 255, 0.08);
+            --color-input-bg: rgba(255, 255, 255, 0.1);
+            --color-input-ring: rgba(255, 255, 255, 0.5);
+            --color-input-placeholder: rgba(255, 255, 255, 0.3);
+            --color-button-bg: rgba(255, 255, 255, 0.1);
+            --color-button-hover-bg: rgba(255, 255, 255, 0.2);
+            --color-current-song-bg: linear-gradient(90deg, hsla(201, 63%, 54%, 0.2), transparent);
+            --color-progress-bar-bg: rgba(255, 255, 255, 0.1);
+            --color-default-cover-bg: linear-gradient(135deg, #2c3e50, #4ca1af);
+            --color-modal-overlay-bg: rgba(0, 0, 0, 0.7);
         }
+
+        body.light-theme {
+            --color-primary: hsl(201, 63%, 45%);
+            --color-secondary: hsl(261, 77%, 50%);
+            --color-accent: hsl(21, 88%, 70%);
+            --color-dark-bg-start: hsl(220, 20%, 90%);
+            --color-dark-bg-end: hsl(220, 20%, 95%);
+            --color-success: hsl(145, 63%, 40%);
+            --color-error: hsl(0, 82%, 60%);
+
+            --color-background-body: hsl(220, 25%, 96%);
+            --color-text-body: hsl(220, 13%, 25%);
+            --color-text-muted: rgba(0, 0, 0, 0.6);
+            --color-text-muted-light: rgba(0, 0, 0, 0.4);
+            --color-glass-bg: rgba(255, 255, 255, 0.7); /* More opaque for light theme */
+            --color-glass-border: rgba(0, 0, 0, 0.08);
+            --color-input-bg: rgba(0, 0, 0, 0.05);
+            --color-input-ring: rgba(0, 0, 0, 0.4);
+            --color-input-placeholder: rgba(0, 0, 0, 0.4);
+            --color-button-bg: rgba(0, 0, 0, 0.05);
+            --color-button-hover-bg: rgba(0, 0, 0, 0.1);
+            --color-current-song-bg: linear-gradient(90deg, hsla(201, 63%, 45%, 0.15), transparent);
+            --color-progress-bar-bg: rgba(0, 0, 0, 0.1);
+            --color-default-cover-bg: linear-gradient(135deg, #bdc3c7, #dce0e2);
+            --color-modal-overlay-bg: rgba(0, 0, 0, 0.5);
+        }
+
         body {
-            background: linear-gradient(135deg, var(--color-dark), hsl(220, 13%, 25%));
-            color: white;
+            background-color: var(--color-background-body);
+            color: var(--color-text-body);
             min-height: 100vh;
             font-family: 'Space Mono', monospace;
+            transition: background-color 0.3s ease, color 0.3s ease;
         }
         .glass-effect {
-            background: rgba(255, 255, 255, 0.08);
+            background: var(--color-glass-bg);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--color-glass-border);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2); /* Shadow might need theme adjustment if too harsh */
         }
-        .neon-text {
-            text-shadow: 0 0 10px rgba(64, 160, 212, 0.7);
+        .neon-text { /* This class might need to be toned down or adjusted for light theme */
+            text-shadow: 0 0 10px var(--color-primary); /* Adjusted to use theme color */
         }
-        .neon-shadow {
-            box-shadow: 0 0 20px rgba(64, 160, 212, 0.3);
+        .neon-shadow { /* This class might need to be toned down or adjusted for light theme */
+            box-shadow: 0 0 20px hsla(var(--color-primary-hsl), 0.3); /* Assuming primary is HSL */
         }
         .progress-bar {
             height: 6px;
-            background: rgba(255, 255, 255, 0.1);
+            background: var(--color-progress-bar-bg);
             border-radius: 3px;
             cursor: pointer;
         }
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+            background: linear-gradient(90deg, var(--color-primary), var(--color-accent)); /* Gradient uses theme colors */
             border-radius: 3px;
-            transition: width 0.1s linear;
+            /* transition: width 0.1s linear; Progress fill width transition is handled by JS */
             position: relative;
         }
         .progress-fill::after {
@@ -332,17 +322,18 @@ if (isset($_GET['action'])) {
             border-radius: 4px;
         }
         .playlist-container::-webkit-scrollbar-track {
-            background: transparent;
+            background: transparent; /* Or a themed variable */
         }
         .song-item:hover {
             transform: translateX(5px);
-            background: rgba(255, 255, 255, 0.1) !important;
+            background: var(--color-button-hover-bg) !important; /* Use themed variable */
         }
         .song-item {
             transition: all 0.2s ease;
+            background-color: var(--color-button-bg); /* Added for consistent base */
         }
         .current-song {
-            background: linear-gradient(90deg, rgba(64, 160, 212, 0.2), transparent) !important;
+            background: var(--color-current-song-bg) !important;
             border-left: 3px solid var(--color-primary);
         }
         .waveform {
@@ -369,7 +360,7 @@ if (isset($_GET['action'])) {
             -webkit-appearance: none;
             width: 100px;
             height: 4px;
-            background: rgba(255, 255, 255, 0.2);
+            background: var(--color-progress-bar-bg); /* Themed */
             border-radius: 2px;
             cursor: pointer;
         }
@@ -377,7 +368,7 @@ if (isset($_GET['action'])) {
             -webkit-appearance: none;
             width: 14px;
             height: 14px;
-            background: white;
+            background: var(--color-text-body); /* Themed */
             border-radius: 50%;
             cursor: pointer;
             transition: transform 0.2s;
@@ -386,11 +377,18 @@ if (isset($_GET['action'])) {
             transform: scale(1.2);
         }
         .modal-overlay {
-            background: rgba(0, 0, 0, 0.7);
+            background: var(--color-modal-overlay-bg);
             backdrop-filter: blur(5px);
             z-index: 100;
+            transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
+            opacity: 0;
+            transform: scale(0.95);
         }
-        .upload-btn {
+        .modal-overlay.active {
+            opacity: 1;
+            transform: scale(1);
+        }
+        .upload-btn { /* This specific button has a gradient, may not theme well or need specific theme versions */
             background: linear-gradient(90deg, var(--color-primary), var(--color-secondary));
             transition: all 0.3s ease;
             box-shadow: 0 4px 15px rgba(64, 160, 212, 0.3);
@@ -404,8 +402,33 @@ if (isset($_GET['action'])) {
         }
         .control-btn:hover {
             transform: scale(1.1);
-            color: var(--color-primary) !important;
+            color: var(--color-primary) !important; /* Primary color for hover icon */
         }
+        /* Generic button theming for buttons that use bg-white/10 or similar */
+        .themed-button {
+            background-color: var(--color-button-bg);
+            color: var(--color-text-body);
+        }
+        .themed-button:hover {
+            background-color: var(--color-button-hover-bg);
+        }
+        .text-muted { /* Helper class for muted text */
+            color: var(--color-text-muted);
+        }
+        .text-muted-light {
+             color: var(--color-text-muted-light);
+        }
+        .input-themed {
+            background-color: var(--color-input-bg) !important; /* Important to override Tailwind if needed */
+            /* Tailwind's focus:ring-white/50 needs to be themed too if we want full control */
+        }
+        .input-themed::placeholder {
+            color: var(--color-input-placeholder);
+        }
+        .input-themed:focus {
+            --tw-ring-color: var(--color-input-ring) !important; /* Override Tailwind focus ring */
+        }
+
         .pulse {
             animation: pulse 2s infinite;
         }
@@ -433,11 +456,11 @@ if (isset($_GET['action'])) {
         }
         /* Default Cover */
         .default-cover {
-            background: linear-gradient(135deg, #2c3e50, #4ca1af);
+            background: var(--color-default-cover-bg);
             display: flex;
             align-items: center;
             justify-content: center;
-            color: rgba(255, 255, 255, 0.5);
+            color: var(--color-text-muted); /* Muted text for icon */
         }
         /* Waveform animation when playing */
         .playing .waveform-bar {
@@ -654,14 +677,22 @@ if (isset($_GET['action'])) {
         <section class="glass-effect rounded-2xl p-6 neon-shadow" aria-labelledby="playlist-heading">
             <div class="flex justify-between items-center mb-4">
                 <h3 id="playlist-heading" class="text-xl font-bold">Playlist</h3>
-                <div class="flex gap-3">
-                    <button id="refreshBtn" aria-label="Refresh playlist" class="bg-white/10 px-3 py-1 rounded-lg hover:bg-white/20" title="Refresh playlist">
+                <div class="flex gap-3 items-center">
+                    <button id="themeToggleBtn" class="themed-button px-3 py-1 rounded-lg" title="Toggle theme">
+                        <i class="fas fa-sun" aria-hidden="true"></i>
+                    </button>
+                    <button id="refreshBtn" aria-label="Refresh playlist" class="themed-button px-3 py-1 rounded-lg" title="Refresh playlist">
                         <i class="fas fa-sync-alt" aria-hidden="true"></i>
                     </button>
                     <button id="uploadBtn" aria-label="Open upload modal" class="upload-btn px-4 py-2 rounded-lg text-white font-medium flex items-center" title="Upload">
                         <i class="fas fa-upload mr-2" aria-hidden="true"></i>Upload
                     </button>
                 </div>
+            </div>
+            <div class="mb-4"> <!-- Search input container -->
+              <input type="search" id="playlistSearchInput"
+                     class="w-full p-3 rounded-lg focus:outline-none focus:ring-2 input-themed"
+                     placeholder="Search playlist (title, artist, album)...">
             </div>
             <!-- Playlist -->
             <div class="playlist-container h-72 overflow-y-auto pr-2">
@@ -673,8 +704,9 @@ if (isset($_GET['action'])) {
                     </li>
                 </ul>
             </div>
-            <footer class="mt-4 text-center text-white/50 text-sm">
-                Made with <span class="text-red-400" aria-hidden="true">❤️</span> by DK.
+            <footer class="mt-4 text-center text-sm text-muted">
+                Made with <span class="text-red-400" aria-hidden="true">❤️</span> by DK. |
+                <a href="#" id="viewLicenseLink" class="hover:text-white underline">View License</a>
             </footer>
         </section>
     </main>
@@ -687,7 +719,7 @@ if (isset($_GET['action'])) {
         <div class="glass-effect rounded-2xl p-6 w-full max-w-md neon-shadow mx-4">
             <div class="flex justify-between items-center mb-4">
                 <h3 id="uploadModalHeading" class="text-xl font-bold">Upload New Song</h3>
-                <button id="cancelBtn" aria-label="Close upload modal" class="text-white/50 hover:text-white">
+                <button id="cancelBtn" aria-label="Close upload modal" class="text-white/50 hover:text-white themed-button">
                     <i class="fas fa-times text-xl" aria-hidden="true"></i>
                 </button>
             </div>
@@ -695,31 +727,31 @@ if (isset($_GET['action'])) {
                 <div>
                     <label for="uploadTitle" class="block mb-2 text-sm font-medium">Song Title</label>
                     <input type="text" id="uploadTitle" name="title" required aria-required="true"
-                            class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30"
+                            class="w-full rounded-lg p-3 focus:outline-none focus:ring-2 input-themed"
                             placeholder="Enter song title">
                 </div>
                 <div>
                     <label for="uploadArtist" class="block mb-2 text-sm font-medium">Artist</label>
                     <input type="text" id="uploadArtist" name="artist" required aria-required="true"
-                            class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30"
+                            class="w-full rounded-lg p-3 focus:outline-none focus:ring-2 input-themed"
                             placeholder="Enter artist name">
                 </div>
                 <div>
                     <label for="albumUploadInput" class="block mb-2 text-sm font-medium">Album (Optional)</label>
                     <input type="text" id="albumUploadInput" name="album"
-                           class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30"
+                           class="w-full rounded-lg p-3 focus:outline-none focus:ring-2 input-themed"
                            placeholder="Enter album name">
                 </div>
                 <div>
                     <label for="uploadLyrics" class="block mb-2 text-sm font-medium">Lyrics (Optional)</label>
                     <textarea id="uploadLyrics" name="lyrics" rows="3"
-                              class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30"
+                              class="w-full rounded-lg p-3 focus:outline-none focus:ring-2 input-themed"
                               placeholder="Enter song lyrics"></textarea>
                 </div>
                 <div>
                     <label class="block mb-2 text-sm font-medium">Cover Art (Optional)</label> <!-- No direct input, label for group -->
                     <div class="flex items-center gap-3">
-                        <label for="coverInput" class="cursor-pointer bg-white/10 rounded-lg p-3 flex-1 text-center hover:bg-white/20">
+                        <label for="coverInput" class="cursor-pointer themed-button rounded-lg p-3 flex-1 text-center">
                             <i class="fas fa-image mr-2" aria-hidden="true"></i>
                             <span id="coverFileName">Choose cover image</span>
                             <input type="file" id="coverInput" name="cover" accept="image/*" class="hidden">
@@ -731,17 +763,17 @@ if (isset($_GET['action'])) {
                 </div>
                 <div>
                     <label for="songInput" class="block mb-2 text-sm font-medium">Song File (MP3)</label>
-                    <label for="songInput" class="cursor-pointer bg-white/10 rounded-lg p-3 flex text-center hover:bg-white/20">
+                    <label for="songInput" class="cursor-pointer themed-button rounded-lg p-3 flex text-center">
                         <i class="fas fa-music mr-2" aria-hidden="true"></i>
                         <span id="songFileName">Choose MP3 file</span>
                         <input type="file" id="songInput" name="song" accept="audio/mp3" required aria-required="true" class="hidden">
                     </label>
                 </div>
                 <div class="flex gap-4 pt-2">
-                    <button type="submit" class="flex-1 bg-white/10 px-4 py-3 rounded-lg hover:bg-white/20 font-medium flex items-center justify-center">
+                    <button type="submit" class="flex-1 themed-button px-4 py-3 rounded-lg font-medium flex items-center justify-center">
                         <i class="fas fa-cloud-upload-alt mr-2" aria-hidden="true"></i>Upload
                     </button>
-                    <button type="button" id="cancelUploadBtn" aria-label="Cancel song upload" class="flex-1 bg-red-500/20 px-4 py-3 rounded-lg hover:bg-red-500/30 font-medium">
+                    <button type="button" id="cancelUploadBtn" aria-label="Cancel song upload" class="flex-1 bg-red-500/20 px-4 py-3 rounded-lg hover:bg-red-500/30 font-medium themed-button">
                         Cancel
                     </button>
                 </div>
@@ -753,12 +785,12 @@ if (isset($_GET['action'])) {
         <div class="glass-effect rounded-2xl p-6 w-full max-w-md neon-shadow mx-4 max-h-[80vh] flex flex-col">
             <div class="flex justify-between items-center mb-4">
                 <h3 id="lyricsModalHeading" class="text-xl font-bold">Lyrics</h3>
-                <button id="closeLyricsBtn" aria-label="Close lyrics modal" class="text-white/50 hover:text-white">
+                <button id="closeLyricsModalBtn" aria-label="Close lyrics modal" class="text-white/50 hover:text-white themed-button">
                     <i class="fas fa-times text-xl" aria-hidden="true"></i>
                 </button>
             </div>
-            <div class="lyrics-container flex-1 overflow-y-auto py-2">
-                <p id="lyricsText" class="text-white/80">No lyrics available for this song.</p>
+            <div class="lyrics-container flex-1 overflow-y-auto py-2 text-sm">
+                <p id="lyricsText" class="text-muted">No lyrics available for this song.</p>
             </div>
         </div>
     </div>
@@ -770,7 +802,7 @@ if (isset($_GET['action'])) {
         <div class="glass-effect rounded-2xl p-6 w-full max-w-md neon-shadow mx-4">
             <div class="flex justify-between items-center mb-4">
                 <h3 id="editSongModalTitle" class="text-xl font-bold">Edit Song Details</h3>
-                <button id="cancelEditSongBtn" aria-label="Close edit dialog" class="text-white/50 hover:text-white">
+                <button id="cancelEditSongBtn" aria-label="Close edit dialog" class="text-white/50 hover:text-white themed-button">
                     <i class="fas fa-times text-xl" aria-hidden="true"></i>
                 </button>
             </div>
@@ -778,27 +810,57 @@ if (isset($_GET['action'])) {
                 <input type="hidden" name="songId" id="editSongIdInput">
                 <div>
                     <label for="editSongTitleInput" class="block mb-2 text-sm font-medium">Title</label>
-                    <input type="text" id="editSongTitleInput" name="title" required aria-required="true" class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30" placeholder="Enter song title">
+                    <input type="text" id="editSongTitleInput" name="title" required aria-required="true" class="w-full rounded-lg p-3 focus:outline-none focus:ring-2 input-themed" placeholder="Enter song title">
                 </div>
                 <div>
                     <label for="editSongArtistInput" class="block mb-2 text-sm font-medium">Artist</label>
-                    <input type="text" id="editSongArtistInput" name="artist" required aria-required="true" class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30" placeholder="Enter artist name">
+                    <input type="text" id="editSongArtistInput" name="artist" required aria-required="true" class="w-full rounded-lg p-3 focus:outline-none focus:ring-2 input-themed" placeholder="Enter artist name">
                 </div>
                 <div>
                     <label for="editSongAlbumInput" class="block mb-2 text-sm font-medium">Album (Optional)</label>
-                    <input type="text" id="editSongAlbumInput" name="album" class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30" placeholder="Enter album name">
+                    <input type="text" id="editSongAlbumInput" name="album" class="w-full rounded-lg p-3 focus:outline-none focus:ring-2 input-themed" placeholder="Enter album name">
                 </div>
                 <div class="flex gap-4 pt-2">
-                    <button type="submit" class="flex-1 upload-btn px-4 py-3 rounded-lg text-white font-medium flex items-center justify-center">
+                    <button type="submit" class="flex-1 upload-btn px-4 py-3 rounded-lg text-white font-medium flex items-center justify-center"> <!-- upload-btn has specific gradient, might keep or theme -->
                         <i class="fas fa-save mr-2" aria-hidden="true"></i>Save Changes
                     </button>
-                    <button type="button" id="closeEditSongModalBtn" class="flex-1 bg-red-500/20 px-4 py-3 rounded-lg hover:bg-red-500/30 font-medium">Cancel</button>
+                    <button type="button" id="closeEditSongModalBtn" class="flex-1 bg-red-500/20 px-4 py-3 rounded-lg hover:bg-red-500/30 font-medium themed-button">Cancel</button>
                 </div>
             </form>
         </div>
     </div>
 
+    <!-- License Modal -->
+    <div id="licenseModal" class="fixed inset-0 hidden items-center justify-center z-50 modal-overlay" role="dialog" aria-modal="true" aria-labelledby="licenseModalTitle" aria-hidden="true">
+        <div class="glass-effect rounded-2xl p-6 w-full max-w-2xl neon-shadow mx-4 max-h-[80vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h3 id="licenseModalTitle" class="text-xl font-bold">License Information</h3>
+                <button id="closeLicenseModalBtn" aria-label="Close license dialog" class="text-white/50 hover:text-white themed-button">
+                    <i class="fas fa-times text-xl" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div id="licenseTextContainer" class="lyrics-container flex-1 overflow-y-auto py-2 text-sm">
+                <p>Loading license...</p>
+            </div>
+        </div>
+    </div>
+
     <script>
+        // Utility Functions
+        const Utils = {
+            formatTime: function(seconds = 0) {
+                if (isNaN(seconds)) seconds = 0;
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
+            },
+            escapeHTML: function(str) {
+                const p = document.createElement('p');
+                p.appendChild(document.createTextNode(str || '')); // Handle null or undefined strings
+                return p.innerHTML;
+            }
+        };
+
         // Global Audio Object and State
         const audio = new Audio();
         let currentSongIndex = -1;
@@ -841,6 +903,7 @@ if (isset($_GET['action'])) {
             closeLyricsBtn: document.getElementById('closeLyricsBtn'),
             playlistElement: document.getElementById('playlist'),
             refreshBtn: document.getElementById('refreshBtn'),
+            themeToggleBtn: document.getElementById('themeToggleBtn'), // Added theme toggle button
             uploadModal: document.getElementById('uploadModal'),
             uploadBtn: document.getElementById('uploadBtn'),
             cancelBtn: document.getElementById('cancelBtn'),
@@ -862,23 +925,79 @@ if (isset($_GET['action'])) {
             editSongAlbumInput: document.getElementById('editSongAlbumInput'),
             cancelEditSongBtn: document.getElementById('cancelEditSongBtn'),
             closeEditSongModalBtn: document.getElementById('closeEditSongModalBtn'),
+            // License Modal Elements
+            licenseModal: document.getElementById('licenseModal'),
+            closeLicenseModalBtn: document.getElementById('closeLicenseModalBtn'),
+            viewLicenseLink: document.getElementById('viewLicenseLink'),
+            licenseTextContainer: document.getElementById('licenseTextContainer'),
+            playlistSearchInput: document.getElementById('playlistSearchInput'), // Added search input
         };
 
         // Initialization
+        // --- Initialization Functions ---
+        function _loadThemePreference() {
+            const savedTheme = localStorage.getItem('musicPlayerTheme');
+            if (savedTheme === 'light') {
+                document.body.classList.add('light-theme');
+                if (UIElements.themeToggleBtn) UIElements.themeToggleBtn.innerHTML = '<i class="fas fa-moon" aria-hidden="true"></i>';
+            } else {
+                if (UIElements.themeToggleBtn) UIElements.themeToggleBtn.innerHTML = '<i class="fas fa-sun" aria-hidden="true"></i>';
+            }
+        }
+
+        function _loadVolumePreference() {
+            const savedVolume = localStorage.getItem('musicPlayerVolume');
+            if (savedVolume !== null) {
+                state.volume = parseFloat(savedVolume);
+                audio.volume = state.volume;
+                if (UIElements.volumeSlider) UIElements.volumeSlider.value = state.volume;
+            }
+             // Apply initial volume to slider UI (if not already set by localStorage load)
+            if (UIElements.volumeSlider && savedVolume === null) { // If no saved volume, ensure slider reflects default state
+                UIElements.volumeSlider.value = state.volume;
+            }
+            if (UIElements.volumeSlider) { // Set ARIA attribute regardless
+                 UIElements.volumeSlider.setAttribute('aria-valuetext', `Volume: ${Math.round(UIElements.volumeSlider.value * 100)}%`);
+            }
+        }
+
+        function _loadShuffleRepeatPreferences() {
+            const savedShuffle = localStorage.getItem('musicPlayerShuffle');
+            if (savedShuffle !== null) {
+                state.isShuffled = savedShuffle === 'true';
+                if (UIElements.shuffleBtn) {
+                    UIElements.shuffleBtn.classList.toggle('text-white', state.isShuffled);
+                    UIElements.shuffleBtn.classList.toggle('text-muted-light', !state.isShuffled);
+                }
+            }
+            const savedRepeat = localStorage.getItem('musicPlayerRepeat');
+            if (savedRepeat !== null) {
+                state.isRepeating = savedRepeat === 'true';
+                 if (UIElements.repeatBtn) {
+                    UIElements.repeatBtn.classList.toggle('text-white', state.isRepeating);
+                    UIElements.repeatBtn.classList.toggle('text-muted-light', !state.isRepeating);
+                }
+            }
+        }
+
         async function init() {
+            _loadThemePreference();
+            _loadVolumePreference();
+            _loadShuffleRepeatPreferences();
+
             await fetchPlaylist();
-            updatePlaylistDisplay();
             createWaveformBars();
             bindEventListeners();
-            setupAudioContextOnce();
-            audio.volume = state.volume;
+            _setupAudioContextOnce();
+
             if ('mediaSession' in navigator) {
                 UIElements.miniPlayer.classList.remove('hidden');
                 setupMediaSession();
             }
+            // Last played song logic is now inside fetchPlaylist's finally block
         }
 
-        function setupAudioContextOnce() {
+        function _setupAudioContextOnce() {
             const initAudio = () => {
                 try {
                     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -898,14 +1017,32 @@ if (isset($_GET['action'])) {
             document.addEventListener('click', initAudio, { once: true });
         }
 
-        // Utility to escape HTML for safe display
-        function escapeHTML(str) {
-            const p = document.createElement('p');
-            p.appendChild(document.createTextNode(str || '')); // Handle null or undefined strings
-            return p.innerHTML;
+        // --- Playlist Management ---
+        function _loadLastPlayedSong() {
+            const lastSongId = localStorage.getItem('musicPlayerLastSongId');
+            const lastSongTime = localStorage.getItem('musicPlayerLastSongTime');
+
+            if (lastSongId !== null && playlist.length > 0) {
+                const songIndexToResume = playlist.findIndex(s => s.id.toString() === lastSongId);
+                if (songIndexToResume !== -1) {
+                    currentSongIndex = songIndexToResume;
+                    const song = playlist[currentSongIndex];
+                    audio.src = song.file;
+
+                    _updateMainPlayerUI(song); // Update UI to show this song is ready
+                    updateMediaSession(song);
+
+                    audio.onloadedmetadata = () => {
+                        if (lastSongTime !== null) audio.currentTime = parseFloat(lastSongTime);
+                        updateTimeDisplay();
+                    };
+                    const songItems = document.querySelectorAll('.song-item');
+                    songItems.forEach((item, i) => item.classList.toggle('current-song', i === songIndexToResume));
+                    showNotification(`Ready: ${Utils.escapeHTML(song.title)}. Press play.`, false);
+                }
+            }
         }
 
-        // Playlist Management
         async function fetchPlaylist() {
             UIElements.playlistElement.innerHTML = `
                 <li class="text-center py-10">
@@ -930,55 +1067,19 @@ if (isset($_GET['action'])) {
                 }
             } catch (error) {
                 console.error("Error fetching playlist:", error);
-                playlist = []; // Ensure playlist is empty on error
+                playlist = [];
                 showNotification(error.message || "Network error loading playlist.", true);
             } finally {
-                updatePlaylistDisplay(); // Always update display, even if it's to show empty
+                updatePlaylistDisplay();
+                _loadLastPlayedSong(); // Attempt to load last played song after playlist is processed
             }
         }
 
-        function createSongListItemHTML(song, index) {
-            const { id, title, artist: songArtist, album, cover, duration } = song; // Destructuring, added id and album
-            const isActive = currentSongIndex === index;
-            return `
-                <li class="song-item bg-white/5 p-3 rounded-lg cursor-pointer hover:bg-white/10 transition-all ${isActive ? 'current-song' : ''}"
-                     data-song-id="${id}" >
-                    <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-md overflow-hidden ${cover ? '' : 'default-cover'} cursor-pointer" onclick="playSong(${index})">
-                            ${cover ? `<img src="${escapeHTML(cover)}" class="w-full h-full object-cover" alt="${escapeHTML(title)} cover art">`
-                                   : `<i class="fas fa-music w-full h-full flex items-center justify-center" aria-hidden="true"></i>`}
-                        </div>
-                        <div class="flex-1 min-w-0 cursor-pointer" onclick="playSong(${index})">
-                            <p class="font-medium truncate">${escapeHTML(title)}</p>
-                            <p class="text-sm text-white/70 truncate">${escapeHTML(songArtist)}</p>
-                            <p class="text-xs text-white/60 truncate">${album ? escapeHTML(album) : ''}</p>
-                        </div>
-                        <span class="text-xs text-white/50 pr-2">${formatTime(duration)}</span>
-                        <button class="edit-song-btn text-white/50 hover:text-white p-1" data-song-id="${id}" aria-label="Edit ${escapeHTML(title)}">
-                            <i class="fas fa-pencil-alt text-xs" aria-hidden="true"></i>
-                        </button>
-                    </div>
-                </li>`;
-        }
-
-        function updatePlaylistDisplay() {
-            if (playlist.length === 0) {
-                UIElements.playlistElement.innerHTML = `
-                    <li class="text-center py-10 text-white/50 no-songs-in-playlist-message">
-                        <i class="fas fa-music text-3xl mb-2" aria-hidden="true"></i> <p>No songs in playlist</p>
-                    </li>`; // Added specific class
-                if (sortableInstance) {
-                    sortableInstance.destroy();
-                    sortableInstance = null;
-                }
-                return;
-            }
-            UIElements.playlistElement.innerHTML = playlist.map(createSongListItemHTML).join('');
-
+        function _initializePlaylistSortable() {
             if (sortableInstance) {
                 sortableInstance.destroy();
             }
-            if (playlist.length > 0) {
+            if (playlist.length > 0 && UIElements.playlistElement) {
                 sortableInstance = new Sortable(UIElements.playlistElement, {
                     animation: 150,
                     ghostClass: 'sortable-ghost',
@@ -996,61 +1097,99 @@ if (isset($_GET['action'])) {
                         .then(data => {
                             if (data.success) {
                                 showNotification('Playlist order saved!');
-                                // Update local playlist array order to match new order immediately
-                                // This avoids waiting for the next full fetchPlaylist
                                 const newPlaylist = songIdsInOrder.map(id => playlist.find(song => song.id.toString() === id));
-                                playlist = newPlaylist.filter(song => song !== undefined); // Filter out any undefined if IDs mismatch
-                                // Re-index currentSongIndex based on the new playlist order
+                                playlist = newPlaylist.filter(song => song !== undefined);
                                 if(currentSongIndex !== -1 && playlist[currentSongIndex]){
-                                   const currentPlayingSongId = playlist[currentSongIndex].id;
-                                   currentSongIndex = playlist.findIndex(song => song.id === currentPlayingSongId);
+                                   const currentPlayingSongId = playlist[currentSongIndex].id; // This might be stale if item was moved
+                                   currentSongIndex = playlist.findIndex(song => song.id.toString() === currentPlayingSongId.toString());
                                 }
-                                // No need to call updatePlaylistDisplay() again here if DOM elements are already in new order
-                                // unless underlying data attributes for onclick (like index) need to be re-evaluated.
-                                // For now, the DOM is visually correct. Next play action will use the updated `playlist` array.
                             } else {
                                 showNotification(data.error || 'Failed to save playlist order.', true);
-                                // Optionally revert optimistic UI update or re-fetch to get server state
+                                // Re-fetch to revert optimistic UI (or more complex revert)
+                                fetchPlaylist();
                             }
                         })
                         .catch(error => {
                             console.error('Error updating playlist order:', error);
                             showNotification('Error saving playlist order.', true);
+                            fetchPlaylist(); // Re-fetch to revert
                         });
                     }
                 });
             }
         }
 
-        // Playback Controls
+        function createSongListItemHTML(song, index) {
+            const { id, title, artist: songArtist, album, cover, duration } = song;
+            const isActive = currentSongIndex === index;
+            return `
+                <li class="song-item p-3 rounded-lg transition-all ${isActive ? 'current-song' : ''}"
+                     data-song-id="${id}" >
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-md overflow-hidden ${cover ? '' : 'default-cover'} cursor-pointer" onclick="playSong(${index})">
+                            ${cover ? `<img src="${Utils.escapeHTML(cover)}" class="w-full h-full object-cover" alt="${Utils.escapeHTML(title)} cover art">`
+                                   : `<i class="fas fa-music w-full h-full flex items-center justify-center" aria-hidden="true"></i>`}
+                        </div>
+                        <div class="flex-1 min-w-0 cursor-pointer" onclick="playSong(${index})">
+                            <p class="font-medium truncate">${Utils.escapeHTML(title)}</p>
+                            <p class="text-sm text-muted truncate">${Utils.escapeHTML(songArtist)}</p>
+                            <p class="text-xs text-muted-light truncate">${album ? Utils.escapeHTML(album) : ''}</p>
+                        </div>
+                        <span class="text-xs text-muted-light pr-2">${Utils.formatTime(duration)}</span>
+                        <button class="edit-song-btn text-muted-light hover:text-white p-1" data-song-id="${id}" aria-label="Edit ${Utils.escapeHTML(title)}">
+                            <i class="fas fa-pencil-alt text-xs" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </li>`;
+        }
+
+        function updatePlaylistDisplay() {
+            if (playlist.length === 0) {
+                UIElements.playlistElement.innerHTML = `
+                    <li class="text-center py-10 text-muted no-songs-in-playlist-message">
+                        <i class="fas fa-music text-3xl mb-2" aria-hidden="true"></i> <p>No songs in playlist</p>
+                    </li>`;
+                if (sortableInstance) {
+                    sortableInstance.destroy();
+                    sortableInstance = null;
+                }
+                return;
+            }
+            UIElements.playlistElement.innerHTML = playlist.map((song, index) => createSongListItemHTML(song, index)).join('');
+            _initializePlaylistSortable();
+        }
+
+        // --- Playback Controls & UI ---
+        function _updateMainPlayerUI(song) {
+            if (!song) return;
+            const { title, artist: songArtist, album, cover, lyrics } = song;
+            UIElements.songTitle.textContent = Utils.escapeHTML(title);
+            UIElements.artist.textContent = Utils.escapeHTML(songArtist);
+            UIElements.currentAlbum.textContent = album ? Utils.escapeHTML(album) : '-';
+            UIElements.songTitle.innerHTML = title.length > 20 ? `<span class="marquee">${Utils.escapeHTML(title)}</span>` : Utils.escapeHTML(title);
+            UIElements.coverArt.innerHTML = cover ? `<img src="${Utils.escapeHTML(cover)}" class="w-full h-full object-cover" alt="${Utils.escapeHTML(title)} cover">` : `<i class="fas fa-music text-5xl"></i>`;
+            UIElements.lyricsText.textContent = lyrics ? Utils.escapeHTML(lyrics) : "No lyrics available for this song.";
+        }
+
         async function playSong(index) {
             if (index < 0 || index >= playlist.length) return;
             currentSongIndex = index;
             const song = playlist[index];
-            const { title, artist: songArtist, album, cover, lyrics, file: songFile } = song; // Destructuring, added album
 
-            UIElements.songTitle.textContent = escapeHTML(title);
-            UIElements.artist.textContent = escapeHTML(songArtist);
-            UIElements.currentAlbum.textContent = album ? escapeHTML(album) : '-'; // Display album
-            UIElements.songTitle.innerHTML = title.length > 20 ? `<span class="marquee">${escapeHTML(title)}</span>` : escapeHTML(title);
-            UIElements.coverArt.innerHTML = cover ? `<img src="${escapeHTML(cover)}" class="w-full h-full object-cover" alt="${escapeHTML(title)} cover">` : `<i class="fas fa-music text-5xl"></i>`;
-            UIElements.lyricsText.textContent = lyrics ? escapeHTML(lyrics) : "No lyrics available for this song.";
+            _updateMainPlayerUI(song); // Update main player display
+            localStorage.setItem('musicPlayerLastSongId', song.id); // Save last played song ID
 
             document.querySelectorAll('.song-item').forEach((item, i) => {
                 item.classList.toggle('current-song', i === index);
             });
 
             updateMediaSession(song);
-            audio.src = songFile;
+            audio.src = song.file;
             audio.load();
             try {
                 await audio.play();
-                UIElements.playBtn.innerHTML = '<i class="fas fa-pause text-2xl"></i>';
-                state.isPlaying = true;
-                UIElements.waveform.classList.remove('hidden');
-                UIElements.waveform.classList.add('playing');
-                showNotification(`Now playing: ${title}`);
-                UIElements.miniPlayer.innerHTML = `<i class="fas fa-pause"></i>`;
+                // UI updates for play/pause state are handled by audio event listeners
+                showNotification(`Now playing: ${Utils.escapeHTML(song.title)}`);
             } catch (error) {
                 console.error("Play error:", error);
                 showNotification('Audio playback error. Click anywhere to try initializing audio.', true);
@@ -1106,16 +1245,20 @@ if (isset($_GET['action'])) {
             if (isNaN(audio.duration) || state.isDraggingProgress) return;
             const progressPercent = (audio.currentTime / audio.duration) * 100;
             UIElements.progress.style.width = `${progressPercent}%`;
-            UIElements.currentTimeDisplay.textContent = formatTime(audio.currentTime);
-            UIElements.durationDisplay.textContent = formatTime(audio.duration);
+            UIElements.currentTimeDisplay.textContent = Utils.formatTime(audio.currentTime);
+            UIElements.durationDisplay.textContent = Utils.formatTime(audio.duration);
             UIElements.progressBar.setAttribute('aria-valuenow', progressPercent.toFixed(0));
-            UIElements.progressBar.setAttribute('aria-valuetext', `Song progress: ${formatTime(audio.currentTime)} of ${formatTime(audio.duration)}`);
+            UIElements.progressBar.setAttribute('aria-valuetext', `Song progress: ${Utils.formatTime(audio.currentTime)} of ${Utils.formatTime(audio.duration)}`);
+
+            // Save current time for "last played position"
+            if (!state.isDraggingProgress && audio.currentTime > 0 && currentSongIndex !== -1) {
+                localStorage.setItem('musicPlayerLastSongTime', audio.currentTime.toString());
+            }
         }
 
         function showNotification(message, isError = false) {
             const { toast } = UIElements;
             toast.textContent = message;
-            // Tailwind classes for base style, then add specific color and 'show'
             toast.className = `fixed bottom-4 right-4 p-4 rounded-lg shadow-lg text-white ${
                 isError ? 'bg-red-500' : 'bg-green-500'
             } show`;
@@ -1139,14 +1282,14 @@ if (isset($_GET['action'])) {
 
         function updateMediaSession(song) {
             if (!('mediaSession' in navigator) || !song) return;
-            const { title, artist: songArtist, album, cover } = song; // Destructuring, added album
+            const { title, artist: songArtist, album, cover } = song;
             navigator.mediaSession.metadata = new MediaMetadata({
-                title: escapeHTML(title),
-                artist: escapeHTML(songArtist),
-                album: album ? escapeHTML(album) : 'Unknown Album',
+                title: Utils.escapeHTML(title),
+                artist: Utils.escapeHTML(songArtist),
+                album: album ? Utils.escapeHTML(album) : 'Unknown Album',
                 artwork: cover ? [
-                    { src: escapeHTML(cover), sizes: '96x96', type: 'image/jpeg' }, // Assuming JPEG, adjust if other types common
-                    { src: escapeHTML(cover), sizes: '128x128', type: 'image/jpeg' },
+                    { src: Utils.escapeHTML(cover), sizes: '96x96', type: 'image/jpeg' },
+                    { src: Utils.escapeHTML(cover), sizes: '128x128', type: 'image/jpeg' },
                     { src: cover, sizes: '192x192', type: 'image/jpeg' },
                     { src: cover, sizes: '256x256', type: 'image/jpeg' },
                     { src: cover, sizes: '384x384', type: 'image/jpeg' },
@@ -1193,17 +1336,21 @@ if (isset($_GET['action'])) {
             UIElements.shuffleBtn.addEventListener('click', () => {
                 state.isShuffled = !state.isShuffled;
                 UIElements.shuffleBtn.classList.toggle('text-white', state.isShuffled);
-                UIElements.shuffleBtn.classList.toggle('text-white/50', !state.isShuffled);
+                UIElements.shuffleBtn.classList.toggle('text-muted-light', !state.isShuffled); // Use themed muted class
+                localStorage.setItem('musicPlayerShuffle', state.isShuffled ? 'true' : 'false');
                 showNotification(state.isShuffled ? 'Shuffle on' : 'Shuffle off');
-                if (!state.isShuffled && playlist.length > 0) { // Optionally re-fetch or re-sort to original order
-                     fetchPlaylist().then(updatePlaylistDisplay); // Example: re-fetch
+                // If shuffle turned off, might want to revert to original fetched order (or last saved manual order)
+                // For now, it just stops random selection for 'next'. If playlist was shuffled client-side, it remains so.
+                if (!state.isShuffled && playlist.length > 0) {
+                     fetchPlaylist(); // Re-fetch to get server-defined order
                 }
             });
 
             UIElements.repeatBtn.addEventListener('click', () => {
                 state.isRepeating = !state.isRepeating;
                 UIElements.repeatBtn.classList.toggle('text-white', state.isRepeating);
-                UIElements.repeatBtn.classList.toggle('text-white/50', !state.isRepeating);
+                UIElements.repeatBtn.classList.toggle('text-muted-light', !state.isRepeating); // Use themed muted class
+                localStorage.setItem('musicPlayerRepeat', state.isRepeating ? 'true' : 'false');
                 showNotification(state.isRepeating ? 'Repeat on' : 'Repeat off');
             });
 
@@ -1227,12 +1374,12 @@ if (isset($_GET['action'])) {
                 if (!state.isDraggingProgress || isNaN(audio.duration)) return;
                 const rect = UIElements.progressBar.getBoundingClientRect();
                 let pos = (e.clientX - rect.left) / rect.width;
-                pos = Math.min(Math.max(pos, 0), 1); // Clamp between 0 and 1
+                pos = Math.min(Math.max(pos, 0), 1);
                 UIElements.progress.style.width = `${pos * 100}%`;
-                UIElements.currentTimeDisplay.textContent = formatTime(pos * audio.duration);
+                UIElements.currentTimeDisplay.textContent = Utils.formatTime(pos * audio.duration);
             });
             document.addEventListener('mouseup', stopDragging);
-            document.addEventListener('mouseleave', stopDragging); // Stop if mouse leaves window
+            document.addEventListener('mouseleave', stopDragging);
 
             audio.addEventListener('timeupdate', updateTimeDisplay);
             audio.addEventListener('ended', () => { state.isRepeating ? playSong(currentSongIndex) : nextSong(); });
@@ -1254,28 +1401,17 @@ if (isset($_GET['action'])) {
             UIElements.volumeSlider.addEventListener('input', (e) => {
                 audio.volume = e.target.value;
                 state.volume = e.target.value;
-            e.target.setAttribute('aria-valuetext', `Volume: ${Math.round(e.target.value * 100)}%`);
+                localStorage.setItem('musicPlayerVolume', e.target.value);
+                e.target.setAttribute('aria-valuetext', `Volume: ${Math.round(e.target.value * 100)}%`);
             });
-        // Set initial aria-valuetext for volume slider
-        UIElements.volumeSlider.setAttribute('aria-valuetext', `Volume: ${Math.round(UIElements.volumeSlider.value * 100)}%`);
+
+            // Modal Controls - openModal and closeModal are already defined and handle transitions
+            UIElements.lyricsBtn.addEventListener('click', () => { openModal(UIElements.lyricsModal); });
+            if(UIElements.closeLyricsModalBtn) UIElements.closeLyricsModalBtn.addEventListener('click', () => { closeModal(UIElements.lyricsModal); }); // Ensure this ID is correct
+            else if(UIElements.closeLyricsBtn) UIElements.closeLyricsBtn.addEventListener('click', () => { closeModal(UIElements.lyricsModal); });
 
 
-            // Modal Controls
-        const openModal = (modalElement) => {
-            modalElement.style.display = 'flex';
-            modalElement.setAttribute('aria-hidden', 'false');
-            // Focus on the first focusable element in the modal if available
-            const focusable = modalElement.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
-            if (focusable) focusable.focus();
-        };
-        const closeModal = (modalElement) => {
-            modalElement.style.display = 'none';
-            modalElement.setAttribute('aria-hidden', 'true');
-        };
-
-        UIElements.lyricsBtn.addEventListener('click', () => { openModal(UIElements.lyricsModal); });
-        UIElements.closeLyricsBtn.addEventListener('click', () => { closeModal(UIElements.lyricsModal); });
-        UIElements.uploadBtn.addEventListener('click', () => { openModal(UIElements.uploadModal); });
+            UIElements.uploadBtn.addEventListener('click', () => { openModal(UIElements.uploadModal); });
             UIElements.cancelBtn.addEventListener('click', () => { closeModal(UIElements.uploadModal); }); // For main upload modal
             UIElements.cancelUploadBtn.addEventListener('click', () => { closeModal(UIElements.uploadModal); }); // For main upload modal
 
@@ -1392,16 +1528,16 @@ if (isset($_GET['action'])) {
 
                             // If the edited song is currently playing, update the main player UI
                             if (currentSongIndex === songIndex) {
-                                UIElements.songTitle.textContent = escapeHTML(title);
-                                UIElements.artist.textContent = escapeHTML(artist);
-                                UIElements.currentAlbum.textContent = album ? escapeHTML(album) : '-';
+                                UIElements.songTitle.textContent = Utils.escapeHTML(title);
+                                UIElements.artist.textContent = Utils.escapeHTML(artist);
+                                UIElements.currentAlbum.textContent = album ? Utils.escapeHTML(album) : '-';
                                 if (title.length > 20) {
-                                   UIElements.songTitle.innerHTML = `<span class="marquee">${escapeHTML(title)}</span>`;
+                                   UIElements.songTitle.innerHTML = `<span class="marquee">${Utils.escapeHTML(title)}</span>`;
                                 }
-                                updateMediaSession(playlist[currentSongIndex]); // Update mini-player too
+                                updateMediaSession(playlist[currentSongIndex]);
                             }
                         }
-                        updatePlaylistDisplay(); // Refresh the specific item or full list
+                        updatePlaylistDisplay();
                     } else {
                         throw new Error(result.error || 'Failed to update song details.');
                     }
@@ -1419,12 +1555,91 @@ if (isset($_GET['action'])) {
                 UIElements.refreshBtn.innerHTML = '<i class="fas fa-sync-alt animate-spin"></i>';
                 await fetchPlaylist();
                 // updatePlaylistDisplay is called in fetchPlaylist's finally block
-                UIElements.refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+                UIElements.refreshBtn.innerHTML = '<i class="fas fa-sync-alt" aria-hidden="true"></i>';
                 showNotification('Playlist refreshed');
             });
+
+            if (UIElements.themeToggleBtn) {
+                UIElements.themeToggleBtn.addEventListener('click', () => {
+                    document.body.classList.toggle('light-theme');
+                    const isLight = document.body.classList.contains('light-theme');
+                    localStorage.setItem('musicPlayerTheme', isLight ? 'light' : 'dark');
+                    UIElements.themeToggleBtn.innerHTML = `<i class="fas ${isLight ? 'fa-moon' : 'fa-sun'}" aria-hidden="true"></i>`;
+                });
+            }
+
+            if (UIElements.playlistSearchInput) {
+                UIElements.playlistSearchInput.addEventListener('input', handlePlaylistSearch);
+            }
+
+            if (UIElements.viewLicenseLink) {
+                UIElements.viewLicenseLink.addEventListener('click', async (event) => {
+                    event.preventDefault();
+                    UIElements.licenseTextContainer.innerHTML = '<p>Loading license...</p>';
+                    openModal(UIElements.licenseModal);
+                    try {
+                        const response = await fetch('LICENSE');
+                        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                        const licenseText = await response.text();
+                        UIElements.licenseTextContainer.innerHTML = `<pre class="whitespace-pre-wrap">${Utils.escapeHTML(licenseText)}</pre>`;
+                    } catch (error) {
+                        console.error('Error fetching license:', error);
+                        UIElements.licenseTextContainer.innerHTML = '<p class="text-red-400">Could not load license information.</p>';
+                    }
+                });
+            }
+            // Ensure correct close button for license modal
+            const actualCloseLicenseModalBtn = document.getElementById('closeLicenseModalBtn'); // Could be different from UIElements.closeLyricsBtn
+            if (actualCloseLicenseModalBtn) {
+                actualCloseLicenseModalBtn.addEventListener('click', () => {
+                    closeModal(UIElements.licenseModal);
+                });
+            }
         }
 
-        // Global Event Listener
+        function handlePlaylistSearch(event) {
+            const searchTerm = event.target.value.toLowerCase().trim();
+            const songItems = UIElements.playlistElement.getElementsByTagName('li');
+            let visibleCount = 0;
+
+            const existingNoResultsMessage = UIElements.playlistElement.querySelector('.no-results-message');
+            if (existingNoResultsMessage) existingNoResultsMessage.remove();
+
+            for (let item of songItems) {
+                if (item.classList.contains('no-songs-in-playlist-message')) {
+                    if (playlist.length === 0) item.style.display = '';
+                    else item.style.display = searchTerm === '' ? '' : 'none';
+                    if(item.style.display === '') visibleCount++;
+                    continue;
+                }
+                if (!item.dataset.songId) continue;
+
+                const songId = item.dataset.songId;
+                const song = playlist.find(s => s.id.toString() === songId);
+
+                if (song) {
+                    const title = (song.title || '').toLowerCase();
+                    const artist = (song.artist || '').toLowerCase();
+                    const album = (song.album || '').toLowerCase();
+
+                    if (title.includes(searchTerm) || artist.includes(searchTerm) || album.includes(searchTerm)) {
+                        item.style.display = '';
+                        visibleCount++;
+                    } else {
+                        item.style.display = 'none';
+                    }
+                }
+            }
+
+            if (visibleCount === 0 && searchTerm !== '' && playlist.length > 0) {
+                let messageLi = document.createElement('li');
+                messageLi.className = 'text-center py-10 text-muted no-results-message';
+                messageLi.innerHTML = `<i class="fas fa-search text-3xl mb-2" aria-hidden="true"></i><p>No songs match "${Utils.escapeHTML(searchTerm)}"</p>`;
+                UIElements.playlistElement.appendChild(messageLi);
+            }
+        }
+
+        // --- Main Setup ---
         window.addEventListener('DOMContentLoaded', init);
         // Expose playSong globally for inline onclick attributes in playlist items
         window.playSong = playSong;

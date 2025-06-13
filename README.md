@@ -24,6 +24,8 @@ A simple, dynamic PHP-based music player web application that allows users to br
 - **Client-Side Playlist Search:** Instantly search/filter the current playlist by song title, artist, or album.
 - **Song Metadata Editing:** Ability to edit title, artist, and album for existing songs directly within the application.
 - **User Preferences Saved:** The player remembers volume, shuffle/repeat settings, and the last played song/position across sessions using Local Storage.
+- **Theme Options:** User-selectable Light and Dark modes, with the preference saved across sessions for a personalized experience.
+- **Polished UI:** Features smoother modal transitions and an overall refined user interface for enhanced visual appeal and usability.
 
 ## Demo
 
@@ -114,13 +116,13 @@ music-player/
 ├── index.php             # Main application file (PHP backend, HTML, CSS, JavaScript)
 ├── database.sql          # MySQL database schema file
 ├── README.md             # This file
-├── LICENSE               # Project license information (GPL-3.0)
+├── LICENSE               # Project license information (MIT License)
 ```
 
-## **License**
+## License
 
-This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.  
-See the [LICENSE](./LICENSE) file for more details.
+This project is licensed under the **MIT License**.
+See the [LICENSE](./LICENSE) file for the full license text. The license information can also be viewed within the application via a link in the footer.
 
 
 ---
