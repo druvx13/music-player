@@ -1,11 +1,9 @@
 <?php
+require_once 'config.php'; // Include the configuration file
+
 // index.php
-// Database configuration
-$host = "localhost"; // Or your specific host
-$db = "db_name"; // Your database name
-$user = "user_name"; // Your database username
-$pass = "user_pass"; // Your database password
-$charset = 'utf8mb4';
+// Database configuration is now in config.php
+$charset = 'utf8mb4'; // Charset can remain here or be moved to config.php if preferred
 
 $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
 $options = [
@@ -27,7 +25,7 @@ if (isset($_GET['action'])) {
         // Get playlist endpoint
         if ($action === 'getPlaylist') {
             header("Content-Type: application/json");
-            $sql = "SELECT id, title, file, cover, artist, lyrics, DATE_FORMAT(uploaded_at, '%Y-%m-%d %H:%i:%s') as uploaded_at FROM songs ORDER BY uploaded_at DESC";
+            $sql = "SELECT id, title, file, cover, artist, lyrics, album, track_order, DATE_FORMAT(uploaded_at, '%Y-%m-%d %H:%i:%s') AS uploaded_at FROM songs ORDER BY track_order ASC, id ASC";
             $stmt = $pdo->query($sql);
             $songs = $stmt->fetchAll();
             echo json_encode($songs);
@@ -39,7 +37,7 @@ if (isset($_GET['action'])) {
 
             // Process song file upload
             if (isset($_FILES['song']) && $_FILES['song']['error'] == UPLOAD_ERR_OK) {
-                $uploadDir = 'uploads/';
+                // $uploadDir is now defined in config.php
                 if (!is_dir($uploadDir)) {
                     // Changed permissions from 0777 to 0755
                     if (!mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
@@ -115,34 +113,129 @@ if (isset($_GET['action'])) {
             $title = (string) ($_POST['title'] ?? pathinfo($songOriginalName, PATHINFO_FILENAME));
             $artist = (string) ($_POST['artist'] ?? 'Unknown Artist');
             $lyrics = (string) ($_POST['lyrics'] ?? '');
+            $album = isset($_POST['album']) ? trim((string)$_POST['album']) : null;
 
             // Basic sanitization (trimming whitespace)
             $title = trim($title);
             $artist = trim($artist);
+            if ($album !== null) {
+                $album = trim($album);
+                if (empty($album)) $album = null; // Set to null if album string is empty after trim
+            }
             // Lyrics can be multi-line, so trim might be too aggressive depending on desired behavior
             // $lyrics = trim($lyrics);
 
 
             // Insert into database
-            $sql = "INSERT INTO songs (title, file, cover, artist, lyrics) VALUES (?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO songs (title, file, cover, artist, lyrics, album) VALUES (?, ?, ?, ?, ?, ?)";
             $stmt = $pdo->prepare($sql);
             // The execute method returns true on success or false on failure.
             // Errors will be caught by the catch block due to PDO::ERRMODE_EXCEPTION
-            $stmt->execute([$title, $songURL, $coverURL, $artist, $lyrics]);
+            $stmt->execute([$title, $songURL, $coverURL, $artist, $lyrics, $album]);
 
             // Get the last inserted ID
             $lastId = $pdo->lastInsertId();
             // Fetch the newly inserted song to return it (optional, but good for UX)
-            $selectStmt = $pdo->prepare("SELECT id, title, file, cover, artist, lyrics, DATE_FORMAT(uploaded_at, '%Y-%m-%d %H:%i:%s') as uploaded_at FROM songs WHERE id = ?");
+            $selectStmt = $pdo->prepare("SELECT id, title, file, cover, artist, lyrics, album, track_order, DATE_FORMAT(uploaded_at, '%Y-%m-%d %H:%i:%s') as uploaded_at FROM songs WHERE id = ?");
             $selectStmt->execute([$lastId]);
             $newSong = $selectStmt->fetch();
 
             echo json_encode(array("success" => "Song uploaded successfully", "song" => $newSong));
         }
+
+        elseif ($action === 'updatePlaylistOrder') {
+            header("Content-Type: application/json");
+            $input = json_decode(file_get_contents('php://input'), true);
+            $songIds = $input['songIds'] ?? null;
+
+            if (!is_array($songIds) || empty($songIds)) {
+                http_response_code(400); // Bad Request
+                echo json_encode(['error' => 'Invalid input. songIds must be a non-empty array.']);
+                exit;
+            }
+
+            try {
+                $pdo->beginTransaction();
+                $sql = "UPDATE songs SET track_order = ? WHERE id = ?";
+                $stmt = $pdo->prepare($sql);
+
+                foreach ($songIds as $index => $songId) {
+                    if (!is_numeric($songId) || $songId <= 0) {
+                        throw new Exception("Invalid song ID: " . $songId);
+                    }
+                    $stmt->execute([$index, (int)$songId]);
+                }
+                $pdo->commit();
+                echo json_encode(['success' => 'Playlist order updated successfully.']);
+
+            } catch (PDOException $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                http_response_code(500); // Internal Server Error
+                error_log("PDO Error updating playlist order: " . $e->getMessage());
+                echo json_encode(['error' => 'Database error while updating order.']);
+            } catch (Exception $e) { // Catch other exceptions like invalid song ID
+                 if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                http_response_code(400); // Bad Request
+                error_log("Error updating playlist order: " . $e->getMessage());
+                echo json_encode(['error' => $e->getMessage()]);
+            }
+            // $pdo is nullified in the main finally block
+        }
+
+        elseif ($action === 'updateSongMetadata') {
+            header("Content-Type: application/json");
+            $input = json_decode(file_get_contents('php://input'), true);
+
+            $songId = filter_var($input['songId'] ?? null, FILTER_VALIDATE_INT);
+            $title = trim((string)($input['title'] ?? ''));
+            $artist = trim((string)($input['artist'] ?? ''));
+            $album = isset($input['album']) ? trim((string)$input['album']) : null;
+            if (empty($album)) $album = null;
+
+
+            if (!$songId || $songId <= 0) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Invalid Song ID.']);
+                exit;
+            }
+            if (empty($title)) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Title cannot be empty.']);
+                exit;
+            }
+            if (empty($artist)) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Artist cannot be empty.']);
+                exit;
+            }
+
+            try {
+                $sql = "UPDATE songs SET title = ?, artist = ?, album = ? WHERE id = ?";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([$title, $artist, $album, $songId]);
+
+                if ($stmt->rowCount() > 0) {
+                    echo json_encode(['success' => 'Song metadata updated successfully.']);
+                } else {
+                    // Potentially, no rows were affected, which could mean the songId didn't exist OR values were the same.
+                    // For simplicity, we'll treat it as success if no error, but one could check song existence first.
+                    echo json_encode(['success' => 'Metadata updated (or values were the same). No rows changed.']);
+                }
+            } catch (PDOException $e) {
+                http_response_code(500);
+                error_log("PDO Error updating song metadata: " . $e->getMessage());
+                echo json_encode(['error' => 'Database error while updating metadata.']);
+            }
+            // $pdo is nullified in the main finally block
+        }
         // If no valid action is provided
         else {
-            // http_response_code(400); // Bad Request
-            // echo json_encode(array("error" => "Invalid action"));
+            http_response_code(400); // Bad Request
+            echo json_encode(array("error" => "Invalid action specified."));
         }
 
     } catch (PDOException $e) {
@@ -164,9 +257,9 @@ if (isset($_GET['action'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Wave Music Player</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
     <title>Neon Wave Music Player - Accessible Music Experience</title>
     <style>
         :root {
@@ -458,6 +551,17 @@ if (isset($_GET['action'])) {
         /* Equalizer Effect for Play Button */
         .equalizer {
             display: flex;
+        }
+        /* SortableJS helper classes */
+        .sortable-ghost {
+            opacity: 0.4;
+            background: #4a5568; /* Tailwind gray-700 */
+        }
+        .sortable-chosen {
+            background: #2d3748; /* Tailwind gray-800 */
+            /* Add a bit more visual feedback for the chosen item */
+            transform: scale(1.02);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
             align-items: flex-end;
             height: 20px;
             gap: 3px;
@@ -508,6 +612,7 @@ if (isset($_GET['action'])) {
                     <div class="mb-4">
                         <h2 id="songTitle" class="text-2xl font-bold mb-1 neon-text truncate max-w-full" aria-live="polite">Select a song</h2>
                         <p id="artist" class="text-white/70" aria-live="polite">-</p>
+                        <p id="currentAlbum" class="text-sm text-white/60 truncate" aria-live="polite">-</p>
                     </div>
                     <div class="progress-bar mb-4" id="progressBar" role="slider" aria-label="Song progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0:00 of 0:00">
                         <div id="progress" class="progress-fill w-0"></div>
@@ -600,6 +705,12 @@ if (isset($_GET['action'])) {
                             placeholder="Enter artist name">
                 </div>
                 <div>
+                    <label for="albumUploadInput" class="block mb-2 text-sm font-medium">Album (Optional)</label>
+                    <input type="text" id="albumUploadInput" name="album"
+                           class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30"
+                           placeholder="Enter album name">
+                </div>
+                <div>
                     <label for="uploadLyrics" class="block mb-2 text-sm font-medium">Lyrics (Optional)</label>
                     <textarea id="uploadLyrics" name="lyrics" rows="3"
                               class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30"
@@ -653,6 +764,40 @@ if (isset($_GET['action'])) {
     </div>
     <!-- Notification Toast -->
     <div id="toast" role="alert" aria-live="assertive" class="fixed bottom-4 right-4 p-4 rounded-lg shadow-lg hidden z-50"></div>
+
+    <!-- Edit Song Modal -->
+    <div id="editSongModal" class="fixed inset-0 hidden items-center justify-center z-50 modal-overlay" role="dialog" aria-modal="true" aria-labelledby="editSongModalTitle" aria-hidden="true">
+        <div class="glass-effect rounded-2xl p-6 w-full max-w-md neon-shadow mx-4">
+            <div class="flex justify-between items-center mb-4">
+                <h3 id="editSongModalTitle" class="text-xl font-bold">Edit Song Details</h3>
+                <button id="cancelEditSongBtn" aria-label="Close edit dialog" class="text-white/50 hover:text-white">
+                    <i class="fas fa-times text-xl" aria-hidden="true"></i>
+                </button>
+            </div>
+            <form id="editSongForm" class="space-y-4">
+                <input type="hidden" name="songId" id="editSongIdInput">
+                <div>
+                    <label for="editSongTitleInput" class="block mb-2 text-sm font-medium">Title</label>
+                    <input type="text" id="editSongTitleInput" name="title" required aria-required="true" class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30" placeholder="Enter song title">
+                </div>
+                <div>
+                    <label for="editSongArtistInput" class="block mb-2 text-sm font-medium">Artist</label>
+                    <input type="text" id="editSongArtistInput" name="artist" required aria-required="true" class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30" placeholder="Enter artist name">
+                </div>
+                <div>
+                    <label for="editSongAlbumInput" class="block mb-2 text-sm font-medium">Album (Optional)</label>
+                    <input type="text" id="editSongAlbumInput" name="album" class="w-full bg-white/10 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-white/50 placeholder-white/30" placeholder="Enter album name">
+                </div>
+                <div class="flex gap-4 pt-2">
+                    <button type="submit" class="flex-1 upload-btn px-4 py-3 rounded-lg text-white font-medium flex items-center justify-center">
+                        <i class="fas fa-save mr-2" aria-hidden="true"></i>Save Changes
+                    </button>
+                    <button type="button" id="closeEditSongModalBtn" class="flex-1 bg-red-500/20 px-4 py-3 rounded-lg hover:bg-red-500/30 font-medium">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         // Global Audio Object and State
         const audio = new Audio();
@@ -662,6 +807,7 @@ if (isset($_GET['action'])) {
         let analyser;
         let dataArray;
         let waveformBars = [];
+        let sortableInstance; // For SortableJS instance
         const state = {
             isPlaying: false,
             isShuffled: false,
@@ -682,6 +828,7 @@ if (isset($_GET['action'])) {
             durationDisplay: document.getElementById('duration'),
             songTitle: document.getElementById('songTitle'),
             artist: document.getElementById('artist'),
+            currentAlbum: document.getElementById('currentAlbum'), // Added for main player album display
             coverArt: document.getElementById('coverArt'),
             waveform: document.getElementById('waveform'),
             volumeSlider: document.getElementById('volumeSlider'),
@@ -706,6 +853,15 @@ if (isset($_GET['action'])) {
             songInput: document.getElementById('songInput'),
             songFileName: document.getElementById('songFileName'),
             toast: document.getElementById('toast'),
+            // Edit Song Modal Elements
+            editSongModal: document.getElementById('editSongModal'),
+            editSongForm: document.getElementById('editSongForm'),
+            editSongIdInput: document.getElementById('editSongIdInput'),
+            editSongTitleInput: document.getElementById('editSongTitleInput'),
+            editSongArtistInput: document.getElementById('editSongArtistInput'),
+            editSongAlbumInput: document.getElementById('editSongAlbumInput'),
+            cancelEditSongBtn: document.getElementById('cancelEditSongBtn'),
+            closeEditSongModalBtn: document.getElementById('closeEditSongModalBtn'),
         };
 
         // Initialization
@@ -742,6 +898,13 @@ if (isset($_GET['action'])) {
             document.addEventListener('click', initAudio, { once: true });
         }
 
+        // Utility to escape HTML for safe display
+        function escapeHTML(str) {
+            const p = document.createElement('p');
+            p.appendChild(document.createTextNode(str || '')); // Handle null or undefined strings
+            return p.innerHTML;
+        }
+
         // Playlist Management
         async function fetchPlaylist() {
             UIElements.playlistElement.innerHTML = `
@@ -775,21 +938,25 @@ if (isset($_GET['action'])) {
         }
 
         function createSongListItemHTML(song, index) {
-            const { title, artist: songArtist, cover, duration } = song; // Destructuring
+            const { id, title, artist: songArtist, album, cover, duration } = song; // Destructuring, added id and album
             const isActive = currentSongIndex === index;
             return `
                 <li class="song-item bg-white/5 p-3 rounded-lg cursor-pointer hover:bg-white/10 transition-all ${isActive ? 'current-song' : ''}"
-                     onclick="playSong(${index})">
+                     data-song-id="${id}" >
                     <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-md overflow-hidden ${cover ? '' : 'default-cover'}">
-                            ${cover ? `<img src="${cover}" class="w-full h-full object-cover">`
-                                   : `<i class="fas fa-music w-full h-full flex items-center justify-center"></i>`}
+                        <div class="w-10 h-10 rounded-md overflow-hidden ${cover ? '' : 'default-cover'} cursor-pointer" onclick="playSong(${index})">
+                            ${cover ? `<img src="${escapeHTML(cover)}" class="w-full h-full object-cover" alt="${escapeHTML(title)} cover art">`
+                                   : `<i class="fas fa-music w-full h-full flex items-center justify-center" aria-hidden="true"></i>`}
                         </div>
-                        <div class="flex-1 min-w-0">
-                            <p class="font-medium truncate">${title}</p>
-                            <p class="text-sm text-white/70 truncate">${songArtist}</p>
+                        <div class="flex-1 min-w-0 cursor-pointer" onclick="playSong(${index})">
+                            <p class="font-medium truncate">${escapeHTML(title)}</p>
+                            <p class="text-sm text-white/70 truncate">${escapeHTML(songArtist)}</p>
+                            <p class="text-xs text-white/60 truncate">${album ? escapeHTML(album) : ''}</p>
                         </div>
-                        <span class="text-xs text-white/50">${formatTime(duration)}</span>
+                        <span class="text-xs text-white/50 pr-2">${formatTime(duration)}</span>
+                        <button class="edit-song-btn text-white/50 hover:text-white p-1" data-song-id="${id}" aria-label="Edit ${escapeHTML(title)}">
+                            <i class="fas fa-pencil-alt text-xs" aria-hidden="true"></i>
+                        </button>
                     </div>
                 </li>`;
         }
@@ -797,12 +964,62 @@ if (isset($_GET['action'])) {
         function updatePlaylistDisplay() {
             if (playlist.length === 0) {
                 UIElements.playlistElement.innerHTML = `
-                    <li class="text-center py-10 text-white/50">
-                        <i class="fas fa-music text-3xl mb-2"></i> <p>No songs in playlist</p>
-                    </li>`;
+                    <li class="text-center py-10 text-white/50 no-songs-in-playlist-message">
+                        <i class="fas fa-music text-3xl mb-2" aria-hidden="true"></i> <p>No songs in playlist</p>
+                    </li>`; // Added specific class
+                if (sortableInstance) {
+                    sortableInstance.destroy();
+                    sortableInstance = null;
+                }
                 return;
             }
             UIElements.playlistElement.innerHTML = playlist.map(createSongListItemHTML).join('');
+
+            if (sortableInstance) {
+                sortableInstance.destroy();
+            }
+            if (playlist.length > 0) {
+                sortableInstance = new Sortable(UIElements.playlistElement, {
+                    animation: 150,
+                    ghostClass: 'sortable-ghost',
+                    chosenClass: 'sortable-chosen',
+                    dragClass: 'sortable-drag',
+                    onEnd: function (evt) {
+                        const songIdsInOrder = Array.from(evt.target.children).map(item => item.dataset.songId);
+
+                        fetch('index.php?action=updatePlaylistOrder', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ songIds: songIdsInOrder })
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                showNotification('Playlist order saved!');
+                                // Update local playlist array order to match new order immediately
+                                // This avoids waiting for the next full fetchPlaylist
+                                const newPlaylist = songIdsInOrder.map(id => playlist.find(song => song.id.toString() === id));
+                                playlist = newPlaylist.filter(song => song !== undefined); // Filter out any undefined if IDs mismatch
+                                // Re-index currentSongIndex based on the new playlist order
+                                if(currentSongIndex !== -1 && playlist[currentSongIndex]){
+                                   const currentPlayingSongId = playlist[currentSongIndex].id;
+                                   currentSongIndex = playlist.findIndex(song => song.id === currentPlayingSongId);
+                                }
+                                // No need to call updatePlaylistDisplay() again here if DOM elements are already in new order
+                                // unless underlying data attributes for onclick (like index) need to be re-evaluated.
+                                // For now, the DOM is visually correct. Next play action will use the updated `playlist` array.
+                            } else {
+                                showNotification(data.error || 'Failed to save playlist order.', true);
+                                // Optionally revert optimistic UI update or re-fetch to get server state
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error updating playlist order:', error);
+                            showNotification('Error saving playlist order.', true);
+                        });
+                    }
+                });
+            }
         }
 
         // Playback Controls
@@ -810,13 +1027,14 @@ if (isset($_GET['action'])) {
             if (index < 0 || index >= playlist.length) return;
             currentSongIndex = index;
             const song = playlist[index];
-            const { title, artist: songArtist, cover, lyrics, file: songFile } = song; // Destructuring
+            const { title, artist: songArtist, album, cover, lyrics, file: songFile } = song; // Destructuring, added album
 
-            UIElements.songTitle.textContent = title;
-            UIElements.artist.textContent = songArtist;
-            UIElements.songTitle.innerHTML = title.length > 20 ? `<span class="marquee">${title}</span>` : title;
-            UIElements.coverArt.innerHTML = cover ? `<img src="${cover}" class="w-full h-full object-cover">` : `<i class="fas fa-music text-5xl"></i>`;
-            UIElements.lyricsText.textContent = lyrics || "No lyrics available for this song.";
+            UIElements.songTitle.textContent = escapeHTML(title);
+            UIElements.artist.textContent = escapeHTML(songArtist);
+            UIElements.currentAlbum.textContent = album ? escapeHTML(album) : '-'; // Display album
+            UIElements.songTitle.innerHTML = title.length > 20 ? `<span class="marquee">${escapeHTML(title)}</span>` : escapeHTML(title);
+            UIElements.coverArt.innerHTML = cover ? `<img src="${escapeHTML(cover)}" class="w-full h-full object-cover" alt="${escapeHTML(title)} cover">` : `<i class="fas fa-music text-5xl"></i>`;
+            UIElements.lyricsText.textContent = lyrics ? escapeHTML(lyrics) : "No lyrics available for this song.";
 
             document.querySelectorAll('.song-item').forEach((item, i) => {
                 item.classList.toggle('current-song', i === index);
@@ -921,13 +1139,14 @@ if (isset($_GET['action'])) {
 
         function updateMediaSession(song) {
             if (!('mediaSession' in navigator) || !song) return;
-            const { title, artist: songArtist, cover } = song; // Destructuring
+            const { title, artist: songArtist, album, cover } = song; // Destructuring, added album
             navigator.mediaSession.metadata = new MediaMetadata({
-                title: title,
-                artist: songArtist,
+                title: escapeHTML(title),
+                artist: escapeHTML(songArtist),
+                album: album ? escapeHTML(album) : 'Unknown Album',
                 artwork: cover ? [
-                    { src: cover, sizes: '96x96', type: 'image/jpeg' }, // Assuming JPEG, adjust if other types common
-                    { src: cover, sizes: '128x128', type: 'image/jpeg' },
+                    { src: escapeHTML(cover), sizes: '96x96', type: 'image/jpeg' }, // Assuming JPEG, adjust if other types common
+                    { src: escapeHTML(cover), sizes: '128x128', type: 'image/jpeg' },
                     { src: cover, sizes: '192x192', type: 'image/jpeg' },
                     { src: cover, sizes: '256x256', type: 'image/jpeg' },
                     { src: cover, sizes: '384x384', type: 'image/jpeg' },
@@ -1057,8 +1276,28 @@ if (isset($_GET['action'])) {
         UIElements.lyricsBtn.addEventListener('click', () => { openModal(UIElements.lyricsModal); });
         UIElements.closeLyricsBtn.addEventListener('click', () => { closeModal(UIElements.lyricsModal); });
         UIElements.uploadBtn.addEventListener('click', () => { openModal(UIElements.uploadModal); });
-        UIElements.cancelBtn.addEventListener('click', () => { closeModal(UIElements.uploadModal); });
-        UIElements.cancelUploadBtn.addEventListener('click', () => { closeModal(UIElements.uploadModal); });
+            UIElements.cancelBtn.addEventListener('click', () => { closeModal(UIElements.uploadModal); }); // For main upload modal
+            UIElements.cancelUploadBtn.addEventListener('click', () => { closeModal(UIElements.uploadModal); }); // For main upload modal
+
+            // Edit Song Modal Controls
+            UIElements.cancelEditSongBtn.addEventListener('click', () => { closeModal(UIElements.editSongModal); });
+            UIElements.closeEditSongModalBtn.addEventListener('click', () => { closeModal(UIElements.editSongModal); });
+
+            // Event delegation for edit buttons on playlist items
+            UIElements.playlistElement.addEventListener('click', function(event) {
+                const editButton = event.target.closest('.edit-song-btn');
+                if (editButton) {
+                    const songId = editButton.dataset.songId;
+                    const songToEdit = playlist.find(s => s.id.toString() === songId);
+                    if (songToEdit) {
+                        UIElements.editSongIdInput.value = songToEdit.id;
+                        UIElements.editSongTitleInput.value = songToEdit.title;
+                        UIElements.editSongArtistInput.value = songToEdit.artist;
+                        UIElements.editSongAlbumInput.value = songToEdit.album || '';
+                        openModal(UIElements.editSongModal);
+                    }
+                }
+            });
 
             // File Input Handlers
             UIElements.coverInput.addEventListener('change', (e) => {
@@ -1080,7 +1319,7 @@ if (isset($_GET['action'])) {
             // Upload Form Submission
             UIElements.uploadForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const submitBtn = e.target.querySelector('button[type="submit"]');
+                const submitBtn = UIElements.uploadForm.querySelector('button[type="submit"]');
                 const originalText = submitBtn.innerHTML;
                 submitBtn.innerHTML = '<div class="spinner mr-2"></div> Uploading...';
                 submitBtn.disabled = true;
@@ -1097,7 +1336,7 @@ if (isset($_GET['action'])) {
                     if (result.success && result.song) {
                         playlist.push(result.song);
                         updatePlaylistDisplay(); // Refresh playlist display
-                        UIElements.uploadModal.style.display = 'none';
+                        closeModal(UIElements.uploadModal);
                         UIElements.uploadForm.reset();
                         UIElements.coverPreview.classList.add('hidden');
                         UIElements.coverFileName.textContent = 'Choose cover image';
@@ -1115,6 +1354,66 @@ if (isset($_GET['action'])) {
                     submitBtn.disabled = false;
                 }
             });
+
+            UIElements.editSongForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const submitBtn = UIElements.editSongForm.querySelector('button[type="submit"]');
+                const originalText = submitBtn.innerHTML;
+                submitBtn.innerHTML = '<div class="spinner mr-2"></div> Saving...';
+                submitBtn.disabled = true;
+
+                const songId = UIElements.editSongIdInput.value;
+                const title = UIElements.editSongTitleInput.value;
+                const artist = UIElements.editSongArtistInput.value;
+                const album = UIElements.editSongAlbumInput.value;
+
+                try {
+                    const response = await fetch('index.php?action=updateSongMetadata', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ songId, title, artist, album })
+                    });
+                    const result = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(result.error || `Server error: ${response.status}`);
+                    }
+
+                    if (result.success) {
+                        closeModal(UIElements.editSongModal);
+                        showNotification('Song details updated successfully!');
+
+                        // Update data in the local playlist array
+                        const songIndex = playlist.findIndex(s => s.id.toString() === songId);
+                        if (songIndex !== -1) {
+                            playlist[songIndex].title = title;
+                            playlist[songIndex].artist = artist;
+                            playlist[songIndex].album = album;
+
+                            // If the edited song is currently playing, update the main player UI
+                            if (currentSongIndex === songIndex) {
+                                UIElements.songTitle.textContent = escapeHTML(title);
+                                UIElements.artist.textContent = escapeHTML(artist);
+                                UIElements.currentAlbum.textContent = album ? escapeHTML(album) : '-';
+                                if (title.length > 20) {
+                                   UIElements.songTitle.innerHTML = `<span class="marquee">${escapeHTML(title)}</span>`;
+                                }
+                                updateMediaSession(playlist[currentSongIndex]); // Update mini-player too
+                            }
+                        }
+                        updatePlaylistDisplay(); // Refresh the specific item or full list
+                    } else {
+                        throw new Error(result.error || 'Failed to update song details.');
+                    }
+                } catch (error) {
+                    console.error("Error updating song metadata:", error);
+                    showNotification(error.message || 'Error updating details.', true);
+                } finally {
+                    submitBtn.innerHTML = originalText;
+                    submitBtn.disabled = false;
+                }
+            });
+
 
             UIElements.refreshBtn.addEventListener('click', async () => {
                 UIElements.refreshBtn.innerHTML = '<i class="fas fa-sync-alt animate-spin"></i>';
