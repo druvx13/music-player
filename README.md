@@ -1,197 +1,145 @@
-# Neon Wave Music Player
+# Neon Wave Music Player (Apiato Edition)
 
-> **⚠️ Found a bug or issue?**  
-> If you encounter or find any error, **do not hesitate to report it in the [Issues](../../issues) section**.  
-> This helps in identifying and fixing problems more effectively. Thank you!
-
----
-
-A simple, dynamic PHP-based music player web application that allows users to browse, play, and manage a list of music tracks stored in a MySQL database, now with an improved project structure for better security and maintainability.
+A dynamic PHP-based music player web application, rebuilt with the Apiato framework for a scalable and maintainable API-centric backend. Users can browse, play, and manage a list of music tracks.
 
 ## Features
 
-- **Music Listing:** Automatically lists all songs from the database.
-- **Audio Player:** Modern HTML5-based music player with play, pause, next, previous, shuffle, repeat, and progress functionality.
-- **Dynamic Waveform Display:** Visual feedback during playback.
-- **Volume Control:** Adjust playback volume.
-- **Database Integration:** Fetches song data (title, artist, file path, cover art path, lyrics) directly from a MySQL database.
-- **Song Uploads:** Easily upload new MP3 tracks with optional cover art, artist details, and lyrics via a user-friendly interface.
-- **Lyrics Display:** View lyrics for the current song if available.
-- **Responsive UI:** Minimal, functional, and aesthetically pleasing interface built with Tailwind CSS.
-- **Mini-Player Support:** Integrates with browser media session for background control.
+- **Music Listing:** Fetches and displays all songs from the database via a robust API.
+- **Audio Player:** Modern HTML5-based music player with play, pause, next, previous, shuffle, repeat, and progress functionality. (Frontend from original project)
+- **Dynamic Waveform Display:** Visual feedback during playback. (Frontend)
+- **Volume Control:** Adjust playback volume. (Frontend)
+- **Apiato Backend:** Leverages Apiato for API development, including request validation, data transformation, and clear business logic encapsulation.
+- **Song Uploads:** Upload new MP3 tracks with optional cover art, artist details, and lyrics via a user-friendly interface, processed by the Apiato backend.
+- **Lyrics Display:** View lyrics for the current song if available. (Frontend)
+- **Responsive UI:** Minimal, functional, and aesthetically pleasing interface. (Frontend, styled with Tailwind CSS via CDN)
 
-## Demo Screenshot
+## Technology Stack
 
-![Music Player Screenshot](./public/assets/images/gtavc-matrix-dk-eu-org-1024xFULLdesktop-dacc32.png)
-*(Screenshot shows the general UI of the music player)*
-
-## Technologies Used
-
-- **Frontend:** HTML, CSS (Tailwind CSS), JavaScript
-- **Backend:** PHP
-- **Database:** MySQL
+- **Backend:** Apiato (built on Laravel 10)
+    - PHP 8.1+
+    - RESTful API
+- **Frontend:**
+    - HTML5
+    - CSS3 (Tailwind CSS via CDN, custom styles in `public/assets/css/style.css`)
+    - JavaScript (ES6+, in `public/assets/js/main.js`)
+- **Database:** MySQL (or other Laravel-supported DB like PostgreSQL, SQLite)
 - **Audio:** HTML5 `<audio>` tag
-- **Icons:** Font Awesome
+- **Icons:** Font Awesome (via CDN)
+- **PHP Package Management:** Composer
 
-## Project Structure
+## Prerequisites
 
-The project follows a structured directory layout to separate concerns:
+- PHP 8.1 or higher (check Apiato/Laravel 10 requirements for specific extensions: Ctype, cURL, DOM, Fileinfo, Filter, Hash, Mbstring, OpenSSL, PCRE, PDO, Session, Tokenizer, XML, JSON, BCMath).
+- Composer installed globally or locally.
+- A supported database server (e.g., MySQL, PostgreSQL).
+- Web server (e.g., Apache, Nginx) with URL rewriting enabled.
+- Node.js and npm/yarn (optional, if frontend assets were to be compiled, but current setup uses CDNs and direct CSS/JS).
 
-```
-music-player/
-├── public/                   # Web server's document root (configure your server to point here)
-│   ├── index.php             # Main HTML shell and entry point
-│   ├── assets/               # Frontend assets
-│   │   ├── css/
-│   │   │   └── style.css     # Custom CSS styles
-│   │   ├── js/
-│   │   │   └── main.js       # Main JavaScript for player logic
-│   │   └── images/
-│   │       └── gtavc-matrix-dk-eu-org-1024xFULLdesktop-dacc32.png # Demo image
-│   └── uploads/              # User-uploaded music and cover art (writable by web server)
-│       └── .gitkeep          # Ensures directory is version controlled
-│
-├── src/                      # PHP source files (backend logic - not publicly accessible)
-│   ├── api.php               # Handles API requests (getPlaylist, uploadSong)
-│   └── config/
-│       ├── db.php            # Database connection helper
-│       ├── config.php        # User-specific database credentials (gitignored)
-│       └── config.php.template # Template for config.php
-│
-├── database.sql              # MySQL database schema dump
-├── LICENSE                   # Project license file
-└── README.md                 # This file
-```
-
-## Getting Started
-
-Follow these steps to set up the project on your local machine:
-
-### Prerequisites
-
-- PHP 7.4 or above (with `mysqli` and `fileinfo` extensions enabled)
-- MySQL 5.7 or above (or MariaDB equivalent)
-- Web server (e.g., Apache, Nginx, XAMPP, WAMP, MAMP)
-- Git (for cloning the repository)
-- Composer (optional, if future PHP dependencies are added)
-
-### Installation
+## Installation
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/druvx13/music-player.git
-    cd music-player
+    git clone https://github.com/your-username/your-repo-name.git neon-wave-music-player
+    cd neon-wave-music-player
     ```
 
-2.  **Set up Database Configuration:**
-    *   Navigate to the `src/config/` directory.
-    *   Copy the template file:
+2.  **Install PHP Dependencies:**
+    ```bash
+    composer install --prefer-dist --no-dev # For production, or without --no-dev for development
+    ```
+
+3.  **Configure Environment:**
+    *   Copy the example environment file:
         ```bash
-        cp config.php.template config.php
+        cp .env.example .env
         ```
-    *   Open `src/config/config.php` in a text editor and update the database credentials:
-        ```php
-        <?php
-        // src/config/config.php
-        define('DB_HOST', 'localhost');     // Your database host
-        define('DB_NAME', 'musicdb');       // Your database name
-        define('DB_USER', 'your_db_user');  // Your database username
-        define('DB_PASS', 'your_db_password'); // Your database password
-        ?>
-        ```
-
-3.  **Import the Database Schema:**
-    *   Access your MySQL management tool (e.g., phpMyAdmin, command line).
-    *   Create a new database (e.g., `musicdb`, matching what you set in `config.php`).
-    *   Import the `database.sql` file (located in the project root) into this newly created database.
-
-4.  **Configure Your Web Server:**
-    *   Set the web server's **document root** (or "web root") to the `public/` directory inside your cloned `music-player` project.
-        *   **Apache:** You might need to edit `httpd.conf` or a virtual host configuration file. Example for a Virtual Host:
-            ```apache
-            <VirtualHost *:80>
-                ServerName musicplayer.local
-                DocumentRoot "/path/to/your/music-player/public"
-                <Directory "/path/to/your/music-player/public">
-                    AllowOverride All
-                    Require all granted
-                    DirectoryIndex index.php
-                </Directory>
-            </VirtualHost>
-            ```
-        *   **Nginx:** Example server block:
-            ```nginx
-            server {
-                listen 80;
-                server_name musicplayer.local;
-                root /path/to/your/music-player/public;
-                index index.php;
-
-                location / {
-                    try_files $uri $uri/ /index.php?$query_string;
-                }
-
-                location ~ \.php$ {
-                    include snippets/fastcgi-php.conf;
-                    fastcgi_pass unix:/var/run/php/php7.4-fpm.sock; # Adjust to your PHP-FPM version/socket
-                    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-                    include fastcgi_params;
-                }
-
-                location ~ /\.ht {
-                    deny all;
-                }
-            }
-            ```
-    *   Ensure URL rewriting is enabled if your server requires it (e.g., `mod_rewrite` for Apache).
-    *   **Note on `.htaccess` files:**
-        *   The `public/.htaccess` file is configured to route requests within the `public` directory to `public/index.php` (front controller).
-        *   A `.htaccess` file is also provided in the project root. Its purpose is to redirect all traffic to the `public/` subdirectory. This is useful if you cannot set your web server's document root directly to `public/` (common in some shared hosting environments). If your document root *is* set to `public/`, the root `.htaccess` may not be strictly necessary but generally won't harm.
-
-5.  **Set Permissions:**
-    *   The `public/uploads/` directory needs to be writable by your web server user (e.g., `www-data`, `apache`).
+    *   Generate the application key:
         ```bash
-        # Example: Adjust user/group as necessary
-        sudo chown www-data:www-data public/uploads
-        sudo chmod 775 public/uploads
+        php artisan key:generate
         ```
-        *(Use `755` if `775` is too permissive and your web server user is the owner. `777` is generally discouraged for security reasons.)*
+    *   Open the `.env` file and configure your application details, especially:
+        *   `APP_NAME`, `APP_URL`
+        *   `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`
+        *   `API_PREFIX` (default `api`), `API_VERSION` (default `v1`) - ensure these match frontend expectations.
 
-6.  **Access the Application:**
-    *   Open your browser and navigate to the URL you configured for your web server (e.g., `http://localhost/music-player/` if using a subdirectory under your default web root, or `http://musicplayer.local` if you set up a virtual host).
+4.  **Run Database Migrations:**
+    This will create the necessary tables in your database (e.g., `songs` table).
+    ```bash
+    php artisan migrate
+    ```
+    *Optional: Seed the database if seeders are created:*
+    ```bash
+    # php artisan db:seed
+    ```
 
-### Adding Music
+5.  **Create Storage Symlink:**
+    This makes files stored in `storage/app/public` accessible from the web.
+    ```bash
+    php artisan storage:link
+    ```
 
--   Once the application is running, click the "Upload" button.
--   Fill in the song details (title, artist, lyrics (optional)).
--   Choose a cover image (optional).
--   Select the MP3 song file.
--   The uploaded songs and their covers will be stored in the `public/uploads/` directory, and their metadata will be saved in the database.
+6.  **Set Permissions:**
+    Ensure the `storage/` and `bootstrap/cache/` directories are writable by the web server.
+    ```bash
+    sudo chmod -R 775 storage bootstrap/cache
+    # Adjust ownership if necessary, e.g., sudo chown -R www-data:www-data storage bootstrap/cache
+    ```
 
-## Development
+7.  **Configure Your Web Server:**
+    *   Set the web server's **document root** (or "web root") to the `public/` directory inside your project.
+    *   Ensure URL rewriting is enabled (e.g., `mod_rewrite` for Apache). The `public/.htaccess` file handles routing for Apache.
+    *   For Nginx, a configuration similar to Laravel's standard Nginx config should be used.
 
--   **PHP Backend:** Logic is primarily in `src/api.php`. Database interactions are managed via `src/config/db.php` using credentials from `src/config/config.php`.
--   **Frontend Assets:** Custom CSS is in `public/assets/css/style.css`. JavaScript is in `public/assets/js/main.js`.
--   **Dependencies:** Tailwind CSS and Font Awesome are loaded via CDN.
+8.  **Access the Application:**
+    *   Open your browser and navigate to the `APP_URL` you configured in your `.env` file. This should load the main music player interface.
+    *   The API will be accessible under `APP_URL`/`API_PREFIX`/`API_VERSION` (e.g., `http://localhost/api/v1/`).
 
-## Contributing
+## API Endpoints
 
-Contributions are welcome! If you'd like to contribute:
+The application exposes the following API endpoints (default prefix `/api`, version `v1`):
 
-1.  Fork the repository.
-2.  Create a new branch (`git checkout -b feature/YourFeatureName`).
-3.  Make your changes.
-4.  Commit your changes (`git commit -m 'Add some amazing feature'`).
-5.  Push to the branch (`git push origin feature/YourFeatureName`).
-6.  Open a Pull Request.
+### Songs
 
-Please ensure your code follows the existing style and that any new features are well-documented.
+*   **`GET /v1/songs`**
+    *   **Description:** Retrieves a list of all available songs.
+    *   **Response:** A JSON array of song objects (see `SongTransformer` for structure), possibly paginated.
+*   **`POST /v1/songs`**
+    *   **Description:** Uploads a new song.
+    *   **Request Type:** `multipart/form-data`
+    *   **Form Fields:**
+        *   `title` (string, required): Song title.
+        *   `artist` (string, nullable): Artist name.
+        *   `lyrics` (string, nullable): Song lyrics.
+        *   `song_file` (file, required): The MP3 audio file (max 20MB).
+        *   `cover_image` (file, nullable): Cover image (JPG, PNG, GIF - max 5MB).
+    *   **Success Response (201 Created):** JSON object of the newly created song.
+    *   **Error Responses:** Standard Apiato error responses (e.g., 422 for validation errors, 500 for server errors).
 
-## License
+*Note: Apiato can generate comprehensive API documentation using `php artisan apiato:generate:apidoc`. Check the `public/docs` directory after running this command.*
 
-This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.  
-See the [LICENSE](./LICENSE) file for more details.
+## Frontend Integration
+
+The frontend is built with HTML, CSS (Tailwind via CDN), and JavaScript (`public/assets/js/main.js`).
+-   The main HTML is served from `resources/views/index.blade.php` via a web route.
+-   `public/assets/js/main.js` needs its `API_ENDPOINT_BASE` variable configured to point to the correct Apiato API base URL (e.g., `/api/v1` or your fully qualified `APP_URL`/`API_PREFIX`/`API_VERSION`).
+
+## Key Artisan Commands (Development)
+
+-   `php artisan serve`: Start the PHP development server.
+-   `php artisan migrate`: Run database migrations.
+-   `php artisan migrate:fresh --seed`: Drop all tables, re-run migrations, and run seeders.
+-   `php artisan key:generate`: Generate a new application key.
+-   `php artisan storage:link`: Create the public storage symlink.
+-   `php artisan list apiato`: List all Apiato specific commands for code generation, etc.
+-   `php artisan route:list`: List all registered routes.
+-   `php artisan tinker`: Interact with your application.
+
+## Troubleshooting
+
+-   **File Upload Issues:** Check permissions on `storage/app/public`, PHP's `upload_max_filesize` and `post_max_size` in `php.ini`. Ensure `php artisan storage:link` was run.
+-   **404 Errors on API or Web Routes:** Verify web server configuration, `.htaccess` (for Apache), and run `php artisan route:list` to check registered routes.
+-   **Database Connection Errors:** Double-check `.env` database credentials. Ensure your database server is running and accessible.
+-   **"Class not found" or similar errors after `composer install`:** Try running `composer dump-autoload`.
 
 ---
-
-Made with ❤️ by DK.
+*This project structure is a simulation of an Apiato application. Not all Apiato features or complexities are fully implemented in this simulated environment.*

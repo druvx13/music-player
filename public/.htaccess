@@ -1,71 +1,21 @@
 <IfModule mod_rewrite.c>
+    <IfModule mod_negotiation.c>
+        Options -MultiViews -Indexes
+    </IfModule>
+
     RewriteEngine On
 
-    # Determine the RewriteBase automatically if the .htaccess is in a subdirectory.
-    # If your site is at http://localhost/music-player/public/, RewriteBase should be /music-player/public/
-    # If your VirtualHost DocumentRoot is set to the public directory, RewriteBase / is usually correct.
-    # This attempts to set it dynamically, but may need manual adjustment in some shared hosting environments.
-    # RewriteCond %{REQUEST_URI} ^/(.+)/[^/]*$
-    # RewriteRule ^.*$ - [E=REWRITEBASE:%1]
-    # RewriteBase /%{ENV:REWRITEBASE}
-
-    # If the above dynamic RewriteBase causes issues, uncomment and set manually:
-    # Example: if your app is in a folder "myapp", use: RewriteBase /myapp/public/
-    # If public is the document root, use: RewriteBase /
-    RewriteBase /
+    # Handle Authorization Header
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
     # Redirect Trailing Slashes If Not A Folder...
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteCond %{REQUEST_URI} (.+)/$
     RewriteRule ^ %1 [L,R=301]
 
-    # Handle Front Controller...
-    # Do not apply to existing real files or directories
+    # Send Requests To Front Controller...
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [L]
 </IfModule>
-
-# Disable directory browsing
-Options -Indexes
-
-# Disable server signature
-ServerSignature Off
-
-# Set some security headers
-<IfModule mod_headers.c>
-    Header set X-Content-Type-Options "nosniff"
-    Header set X-XSS-Protection "1; mode=block"
-    Header set X-Frame-Options "SAMEORIGIN"
-    # Content-Security-Policy is powerful but complex. Start with a basic one or leave it out if unsure.
-    # Example: Header set Content-Security-Policy "default-src 'self'; script-src 'self' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; img-src 'self' data:;"
-    # The above CSP is an example and needs to be tailored to your specific needs and CDN usage.
-    # For this project, Tailwind and FontAwesome are from CDNs, so they are included.
-    # 'unsafe-inline' is often needed for simple inline styles/scripts but try to avoid if possible.
-    # The current project uses inline styles for the floating visualizer, and JS generates some styles.
-    # For now, I'm commenting out the CSP header as it requires careful tuning.
-    # Header set Content-Security-Policy "default-src 'self'; script-src 'self' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; img-src 'self' data: blob:; media-src 'self' blob:;"
-
-    # Referrer-Policy
-    Header set Referrer-Policy "strict-origin-when-cross-origin"
-</IfModule>
-
-# Prevent access to .htaccess and other sensitive files
-<FilesMatch "^\.(htaccess|htpasswd|ini|phps|fla|psd|log|sh)$">
-    Require all denied
-</FilesMatch>
-
-# PHP settings (optional, some hosts may not allow these)
-<IfModule php_module> # Or php7_module, php8_module etc. depending on server
-    # Example: Increase upload size (if not configurable elsewhere)
-    # php_value upload_max_filesize 64M
-    # php_value post_max_size 64M
-    # php_value max_execution_time 300
-    # php_value max_input_time 300
-
-    # Disable exposure of PHP version
-    php_flag expose_php Off
-</IfModule>
-
-# Default charset
-AddDefaultCharset UTF-8
