@@ -1,4 +1,3 @@
-```markdown
 # Neon Wave Music Player
 
 > **⚠️ Found a bug or issue?**  
@@ -196,4 +195,3 @@ See the [LICENSE](./LICENSE) file for more details.
 ---
 
 Made with ❤️ by DK.
-```
