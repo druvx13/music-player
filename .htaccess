@@ -1,0 +1,32 @@
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Check if the request is not already for the public folder or an existing file/directory in the root
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+
+    # Rewrite the request to the public folder, appending the original request URI
+    # Example: example.com/some/path -> example.com/public/some/path
+    # The .htaccess in /public/ will then handle further routing (e.g., to index.php)
+    RewriteRule ^(.*)$ public/$1 [L,QSA]
+
+    # If the request is for the root of the project (e.g. example.com/),
+    # rewrite to public/index.php
+    RewriteCond %{REQUEST_URI} ^/$
+    RewriteRule ^$ public/index.php [L]
+</IfModule>
+
+# Disable directory browsing for the root directory
+Options -Indexes
+
+# Prevent access to sensitive files in the root (e.g., .git folder, .env if used)
+<FilesMatch "^\.(git|env)">
+    Require all denied
+</FilesMatch>
+
+# It's generally better to have PHP settings in .user.ini or php.ini
+# but if needed and allowed by host:
+# <IfModule php_module>
+#     php_flag expose_php Off
+# </IfModule>

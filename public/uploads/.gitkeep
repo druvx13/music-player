@@ -1,0 +1,7 @@
+# This file is intentionally blank.
+# It's used to ensure that the 'uploads' directory is tracked by Git,
+# even if it's empty initially. User-uploaded files in this directory
+# should ideally be added to .gitignore if they are not meant to be
+# version controlled (e.g., in a production environment).
+# For this project, we assume uploads might be part of the repo content
+# or the user will manage .gitignore for uploads themselves.

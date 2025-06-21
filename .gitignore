@@ -1,0 +1,30 @@
+# Configuration files
+src/config/config.php
+
+# User uploaded content (if you don't want to version control them)
+# Depending on deployment strategy, you might want to version control
+# an initial set of uploads, or none at all.
+# For now, commenting this out as the user might want to commit some initial songs.
+# public/uploads/*
+# !public/uploads/.gitkeep
+
+# IDE / OS specific
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Composer dependencies (if Composer is ever used)
+vendor/
+composer.lock
+composer.phar
+
+# Log files (if any are generated, good practice to ignore)
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

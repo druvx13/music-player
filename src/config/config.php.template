@@ -1,0 +1,29 @@
+<?php
+// src/config/config.php.template
+// Template for database configuration.
+//
+// Instructions:
+// 1. Copy this file to "config.php" in the same directory (src/config/).
+//    cp config.php.template config.php
+// 2. Edit "config.php" with your actual database credentials.
+// 3. Ensure "config.php" is NOT committed to version control if it contains sensitive information.
+//    It should typically be added to your .gitignore file.
+
+define('DB_HOST', 'localhost');     // Replace with your database host, e.g., '127.0.0.1' or 'localhost'
+define('DB_NAME', 'musicdb');       // Replace with your database name
+define('DB_USER', 'root');          // Replace with your database username
+define('DB_PASS', '');              // Replace with your database password
+
+// Optional: Set character set (highly recommended)
+define('DB_CHARSET', 'utf8mb4');
+
+// Optional: Base URL of the application (if needed, e.g. for constructing full URLs)
+// Useful if your application is not running at the root of your domain.
+// Example: define('BASE_URL', 'http://localhost/music-player');
+// If not defined, relative paths will be used.
+// define('BASE_URL', '');
+
+// Optional: Path to the uploads directory, relative to the public directory.
+// Default is 'uploads/'. Ensure this directory is writable by the web server.
+define('UPLOADS_DIR', 'uploads/');
+?>
