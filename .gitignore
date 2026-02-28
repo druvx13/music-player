@@ -24,3 +24,8 @@ Thumbs.db
 # Build artifacts
 dist/
 *.log
+
+# Python
+__pycache__/
+*.py[cod]
+python/music_player.db
