@@ -1,0 +1,154 @@
+# ============================================================
+#  Music Player — Root .htaccess
+#  Apache 2.4+  |  mod_rewrite, mod_headers, mod_deflate,
+#                   mod_expires required
+# ============================================================
+
+# ── Engine ──────────────────────────────────────────────────
+Options -Indexes -MultiViews
+Options +FollowSymLinks
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # ── Force HTTPS (uncomment when SSL is available) ─────
+    # RewriteCond %{HTTPS} off
+    # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # ── Block direct access to sensitive files ─────────────
+    # Deny .htaccess, .env, composer files, etc.
+    RewriteRule ^(\.htaccess|\.env|composer\.(json|lock))$ - [F,L]
+</IfModule>
+
+# ── Protect sensitive directories ────────────────────────────
+# config/ must never be reachable from the browser
+<IfModule mod_authz_core.c>
+    <FilesMatch "^.*$">
+        # Overridden per-directory; handled by config/.htaccess
+    </FilesMatch>
+</IfModule>
+
+# ── Security headers ─────────────────────────────────────────
+<IfModule mod_headers.c>
+    # Prevent clickjacking
+    Header always set X-Frame-Options "SAMEORIGIN"
+
+    # Prevent MIME-type sniffing
+    Header always set X-Content-Type-Options "nosniff"
+
+    # Basic XSS filter (legacy browsers)
+    Header always set X-XSS-Protection "1; mode=block"
+
+    # Referrer policy
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+    # Content-Security-Policy — tighten as needed
+    Header always set Content-Security-Policy "\
+default-src 'self'; \
+script-src 'self' https://cdn.tailwindcss.com 'unsafe-inline'; \
+style-src 'self' https://cdnjs.cloudflare.com https://fonts.googleapis.com 'unsafe-inline'; \
+font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; \
+img-src 'self' data: blob:; \
+media-src 'self' blob:; \
+connect-src 'self'; \
+frame-ancestors 'none';"
+
+    # Remove server fingerprint headers
+    Header always unset X-Powered-By
+    Header always unset Server
+</IfModule>
+
+# ── Compression (Gzip / Deflate) ─────────────────────────────
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/css
+    AddOutputFilterByType DEFLATE application/javascript application/json
+    AddOutputFilterByType DEFLATE application/x-font-ttf font/opentype
+    AddOutputFilterByType DEFLATE image/svg+xml
+
+    # Don't compress already-compressed formats
+    SetEnvIfNoCase Request_URI \.(mp3|mp4|ogg|flac|gif|jpg|jpeg|png|webp|ico|gz|zip)$ no-gzip
+</IfModule>
+
+# ── Browser caching ───────────────────────────────────────────
+<IfModule mod_expires.c>
+    ExpiresActive On
+
+    # HTML (short cache — dynamic content)
+    ExpiresByType text/html                  "access plus 1 hour"
+
+    # CSS / JS (version-bust by changing filename if content changes)
+    ExpiresByType text/css                   "access plus 1 year"
+    ExpiresByType application/javascript     "access plus 1 year"
+
+    # Fonts
+    ExpiresByType font/woff2                 "access plus 1 year"
+    ExpiresByType font/woff                  "access plus 1 year"
+    ExpiresByType font/ttf                   "access plus 1 year"
+    ExpiresByType application/x-font-ttf     "access plus 1 year"
+
+    # Images
+    ExpiresByType image/jpeg                 "access plus 1 year"
+    ExpiresByType image/png                  "access plus 1 year"
+    ExpiresByType image/webp                 "access plus 1 year"
+    ExpiresByType image/gif                  "access plus 1 year"
+    ExpiresByType image/svg+xml              "access plus 1 year"
+    ExpiresByType image/x-icon               "access plus 1 year"
+
+    # Audio (uploaded files)
+    ExpiresByType audio/mpeg                 "access plus 1 month"
+    ExpiresByType audio/ogg                  "access plus 1 month"
+</IfModule>
+
+# ── Cache-Control headers ─────────────────────────────────────
+<IfModule mod_headers.c>
+    <FilesMatch "\.(css|js|woff2?|ttf|eot|svg|ico)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
+    <FilesMatch "\.(jpg|jpeg|png|webp|gif)$">
+        Header set Cache-Control "public, max-age=31536000"
+    </FilesMatch>
+    <FilesMatch "\.(mp3|ogg|flac)$">
+        Header set Cache-Control "public, max-age=2592000"
+    </FilesMatch>
+    <FilesMatch "\.php$">
+        Header set Cache-Control "no-store, no-cache, must-revalidate"
+    </FilesMatch>
+</IfModule>
+
+# ── PHP settings (if PHP is loaded as Apache module) ─────────
+<IfModule mod_php.c>
+    php_flag  display_errors        Off
+    php_flag  log_errors            On
+    php_value upload_max_filesize   50M
+    php_value post_max_size         52M
+    php_value memory_limit          128M
+    php_value max_execution_time    60
+</IfModule>
+
+# ── Default charset and MIME types ───────────────────────────
+AddDefaultCharset UTF-8
+
+<IfModule mod_mime.c>
+    AddType audio/mpeg        .mp3
+    AddType audio/ogg         .ogg .oga
+    AddType image/webp        .webp
+    AddType font/woff2        .woff2
+    AddType font/woff         .woff
+</IfModule>
+
+# ── Protect .htaccess itself ──────────────────────────────────
+<Files ".htaccess">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</Files>
+
+# ── Custom error pages (optional — create these files if desired) ─
+# ErrorDocument 403 /error/403.html
+# ErrorDocument 404 /error/404.html
+# ErrorDocument 500 /error/500.html

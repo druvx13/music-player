@@ -1,41 +1,50 @@
 > **⚠️ Found a bug or issue?**  
-> If you encounter or find any error, **do not hesitate to report it in the [Issues](../../issues) section**.  
-> This helps me identify and fix problems more effectively. Thank you!
+> If you encounter any error, **report it in the [Issues](../../issues) section**.  
+> This helps me identify and fix problems faster. Thank you!
 
 ---
 
-# Music Player Web App
+# Neon Wave Music Player
 
-A simple, dynamic PHP-based music player web application that allows users to browse, play, and manage a list of music tracks stored in a MySQL database.
+A PHP-based music player web application that lets you browse, upload, and play
+music tracks stored in a MySQL / MariaDB database — all from the browser.
 
 ## Features
 
-- **Music Listing:** Automatically lists all songs from the database.
-- **Audio Player:** HTML5-based music player with play, pause, and progress functionality.
-- **Database Integration:** Fetches song data (title, file path) directly from a MySQL database.
-- **Responsive UI:** Minimal, functional interface for seamless listening.
+- **Music listing** — all songs fetched from the database, newest first.
+- **HTML5 audio player** — play / pause, previous / next, seek (mouse & touch),
+  volume control, repeat, shuffle.
+- **Upload** — add songs with title, artist, lyrics, and optional cover art
+  directly from the browser.
+- **Waveform visualizer** — real-time frequency bars via the Web Audio API.
+- **Lyrics viewer** — modal overlay with scrollable lyrics.
+- **Media Session API** — integrates with OS media controls / lock-screen.
+- **Responsive UI** — works on desktop, tablet, and mobile.
 
 ## Demo
 
-![Music Player Screenshot](gtavc-matrix-dk-eu-org-1024xFULLdesktop-dacc32.png)  
+![Music Player Screenshot](gtavc-matrix-dk-eu-org-1024xFULLdesktop-dacc32.png)
 
+## Technologies
 
-## Technologies Used
-
-- **Frontend:** HTML, CSS, JavaScript
-- **Backend:** PHP
-- **Database:** MySQL
-- **Audio:** HTML5 `<audio>` tag
+| Layer      | Tech                                         |
+|------------|----------------------------------------------|
+| Frontend   | HTML5, CSS3, JavaScript (ES2020+)            |
+| Styles     | Tailwind CSS (Play CDN), custom CSS          |
+| Icons      | Font Awesome 6.7.2                           |
+| Font       | Space Mono (Google Fonts)                    |
+| Backend    | PHP 8.1+                                     |
+| Database   | MySQL 8.0+ / MariaDB 10.5+ (InnoDB, utf8mb4) |
+| Web server | Apache 2.4+ (with `.htaccess`)               |
 
 ## Getting Started
 
-Follow these steps to set up the project on your local machine:
-
 ### Prerequisites
 
-- PHP 7.x or above
-- MySQL
-- Web server (e.g., XAMPP, LAMP, or WAMP)
+- PHP **8.1** or newer
+- MySQL **8.0+** or MariaDB **10.5+**
+- Apache **2.4+** with `mod_rewrite`, `mod_headers`, `mod_deflate`, `mod_expires` enabled
+- (Optional) XAMPP / LAMP / WAMP for local development
 
 ### Installation
 
@@ -45,47 +54,84 @@ Follow these steps to set up the project on your local machine:
    cd music-player
    ```
 
-2. **Import the Database:**
-   - Open phpMyAdmin.
-   - Create a new database, e.g., `musicdb`.
-   - Import the provided `database.sql` file into this database.
+2. **Import the database schema:**
+   ```bash
+   mysql -u <user> -p <database_name> < database.sql
+   ```
+   Or via phpMyAdmin: create a new database and import `database.sql`.
 
-3. **Update Database Configuration:**
-   - Open `index.php`.
-   - Modify the MySQL credentials if necessary:
-     ```php
-     // Database configuration
-     $host = "localhost";
-     $db = "db_name";
-     $user = "user_name";
-     $pass = "user_pass";
-     ```
+3. **Configure the database connection:**
 
-4. **Add Your Music Files:**
-   - Upload your audio favourite audios through the upload button shown in index.php which will popup an form field to be filled in and you can customise that however you want and the uploaded songs & their covers will be stored in `/uploads` directory & such other things such as title, artist, lyrics etc will be stored in MySQL database.
-   - Make sure the file names match the entries in your database.
+   Open `config/database.php` and update the constants:
+   ```php
+   define('DB_HOST', 'localhost');
+   define('DB_NAME', 'your_database');
+   define('DB_USER', 'your_username');
+   define('DB_PASS', 'your_password');
+   ```
 
-5. **Run the App:**
-   - Open your browser and navigate to:
-     ```
-     http://localhost/music-player/index.php
-     ```
+4. **Verify directory permissions:**
+
+   The web-server process must be able to write to the `uploads/` folder:
+   ```bash
+   chmod 755 uploads/
+   ```
+
+5. **Enable Apache modules** (if not already active):
+   ```bash
+   sudo a2enmod rewrite headers deflate expires
+   sudo systemctl restart apache2
+   ```
+
+6. **Open in your browser:**
+   ```
+   http://localhost/music-player/
+   ```
 
 ## Project Structure
 
 ```
 music-player/
-├── uploads/              # Folder for audio files
-├── index.php          # Main PHP application file
-├── database.sql        # MySQL dump file
-├── README.md           
-├── LICENCE         
+├── .htaccess               # Root Apache config (security headers, caching, compression)
+├── index.php               # Main HTML entry point
+├── database.sql            # MySQL / MariaDB schema
+├── README.md
+├── LICENSE
+│
+├── config/
+│   ├── .htaccess           # Deny all web access to this directory
+│   └── database.php        # Database credentials & connection helper
+│
+├── api/
+│   ├── playlist.php        # GET  → returns JSON array of songs
+│   └── upload.php          # POST → handles song + cover upload, inserts DB row
+│
+├── assets/
+│   ├── css/
+│   │   └── style.css       # Application styles (imports Google Fonts)
+│   └── js/
+│       └── player.js       # Audio player logic, playlist UI, upload form
+│
+└── uploads/
+    ├── .htaccess           # Disables PHP execution — prevents uploaded-file attacks
+    └── (audio & cover files stored here)
 ```
 
-## **License**
+## Security Notes
+
+- **PHP execution disabled** in `uploads/` via `.htaccess` — a maliciously
+  renamed script cannot run even if it is uploaded.
+- **`config/` is blocked** from web access via its own `.htaccess`.
+- Upload API validates **MIME type** (not just file extension) using `finfo`.
+- Uploaded filenames are replaced with **random hex strings** to prevent
+  path-traversal and enumeration.
+- All database queries use **prepared statements** (MySQLi).
+- Security headers (`X-Frame-Options`, `X-Content-Type-Options`,
+  `Content-Security-Policy`, etc.) are sent via the root `.htaccess`.
+
+## License
 
 This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.  
-See the [LICENSE](./LICENSE) file for more details.
-
+See the [LICENSE](./LICENSE) file for details.
 
 ---
