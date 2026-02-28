@@ -1,0 +1,12 @@
+# config/.htaccess
+# Deny ALL web access to the config directory.
+# Database credentials must never be served over HTTP.
+
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

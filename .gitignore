@@ -1,0 +1,26 @@
+# Dependencies / package managers
+vendor/
+node_modules/
+
+# Uploaded user content (audio and cover images)
+# The directory itself is tracked via uploads/.gitkeep
+uploads/*
+!uploads/.htaccess
+!uploads/.gitkeep
+
+# Environment / secrets
+.env
+.env.*
+# Editor / OS metadata
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-workspace
+
+# Build artifacts
+dist/
+*.log
